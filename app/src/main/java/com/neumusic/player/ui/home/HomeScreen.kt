@@ -176,10 +176,8 @@ fun HomeScreen(
         scope.launch {
             runCatching { ApiCache.getOrPut("likedCount") { PlaylistApi.likedPage(0, 1).total } }
                 .getOrNull()?.let { c ->
-                    if (c != null) {
-                        likedCount = c
-                        HomeCache.saveLikedCount(c)
-                    }
+                    likedCount = c
+                    HomeCache.saveLikedCount(c)
                 }
         }
     }

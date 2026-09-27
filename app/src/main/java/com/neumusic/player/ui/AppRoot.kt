@@ -23,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -120,28 +121,28 @@ fun AppRoot() {
                     onBack = { back() },
                     onOpen = { open(Nav.AlbumDetail(it.mid, it.name, it.songnum)) },
                 )
-                Nav.Liked -> TrackListScreen(
+                Nav.Liked -> key("liked") { TrackListScreen(
                     title = "我喜欢", onBack = { back() },
                     cacheKey = "liked",
                     loadPage = { off, num -> PlaylistApi.likedPage(off, num) },
                     onOpenAlbum = { t -> open(Nav.AlbumDetail(t.albumMid, t.albumName)) },
-                )
+                ) }
                 Nav.Equalizer -> EqualizerScreen(onBack = { back() })
-                is Nav.PlaylistDetail -> TrackListScreen(
+                is Nav.PlaylistDetail -> key("playlist:${page.tid}") { TrackListScreen(
                     title = page.name, onBack = { back() },
                     cacheKey = "playlist:${page.tid}",
                     knownTotal = page.songnum,
                     loadPage = { off, num -> PlaylistApi.playlistPage(page.tid, off, num) },
                     onOpenAlbum = { t -> open(Nav.AlbumDetail(t.albumMid, t.albumName)) },
-                )
-                is Nav.AlbumDetail -> TrackListScreen(
+                ) }
+                is Nav.AlbumDetail -> key("album:${page.mid}") { TrackListScreen(
                     title = page.name, onBack = { back() },
                     cacheKey = "album:${page.mid}",
                     knownTotal = page.songnum,
                     loadPage = { off, num -> PlaylistApi.albumPage(page.mid, off, num) },
                     onOpenAlbum = { t -> open(Nav.AlbumDetail(t.albumMid, t.albumName)) },
-                )
-                is Nav.RadioDetail -> TrackListScreen(
+                ) }
+                is Nav.RadioDetail -> key("radio:${page.id}") { TrackListScreen(
                     title = page.title, onBack = { back() },
                     cacheKey = "radio:${page.id}",
                     // 电台没有总数概念，一次取一大页即可。
@@ -152,7 +153,7 @@ fun AppRoot() {
                         )
                     },
                     onOpenAlbum = { t -> open(Nav.AlbumDetail(t.albumMid, t.albumName)) },
-                )
+                ) }
                 // 播放页只作为覆盖层出现，正常情况下不会是 `page`；兜底不渲染底层内容。
                 Nav.Player -> Unit
             }
