@@ -143,23 +143,27 @@ fun AppRoot() {
                 )
                 is Page.Liked -> TrackListScreen(
                     title = "我喜欢", onBack = { page = Page.Home },
+                    cacheKey = "liked",
                     loadPage = { off, num -> PlaylistApi.likedPage(off, num) },
                     onOpenAlbum = { t -> page = Page.AlbumDetail(t.albumMid, t.albumName) },
                 )
                 is Page.PlaylistDetail -> TrackListScreen(
                     title = p.name, onBack = { page = Page.Playlists() },
+                    cacheKey = "playlist:${p.tid}",
                     knownTotal = p.songnum,
                     loadPage = { off, num -> PlaylistApi.playlistPage(p.tid, off, num) },
                     onOpenAlbum = { t -> page = Page.AlbumDetail(t.albumMid, t.albumName) },
                 )
                 is Page.AlbumDetail -> TrackListScreen(
                     title = p.name, onBack = { page = Page.Albums() },
+                    cacheKey = "album:${p.mid}",
                     knownTotal = p.songnum,
                     loadPage = { off, num -> PlaylistApi.albumPage(p.mid, off, num) },
                     onOpenAlbum = { t -> page = Page.AlbumDetail(t.albumMid, t.albumName) },
                 )
                 is Page.RadioDetail -> TrackListScreen(
                     title = p.title, onBack = { page = Page.Radio },
+                    cacheKey = "radio:${p.id}",
                     // 电台没有总数概念，一次取一大页即可。
                     loadPage = { off, num ->
                         PlaylistApi.Page(

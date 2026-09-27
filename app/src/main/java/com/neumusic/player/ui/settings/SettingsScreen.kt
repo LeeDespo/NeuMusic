@@ -130,6 +130,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                         scope.launch { ApiCache.clear() }
                         LikedStore.clear()
                         HomeCache.clear()
+                        com.neumusic.player.ui.home.TrackListCache.clear()
                         toastMain(context, "已退出登录")
                     }
                 }

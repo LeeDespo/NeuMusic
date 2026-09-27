@@ -109,6 +109,8 @@ fun DetailTopBar(title: String, onBack: () -> Unit) {
 fun TrackListScreen(
     title: String,
     onBack: () -> Unit,
+    /** 缓存键（如 "liked" / "playlist:123"）。相同键二次进入直接复用结果，不再重拉。 */
+    cacheKey: String,
     loadPage: suspend (offset: Int, num: Int) -> PlaylistApi.Page,
     /** 总数已知时的提示（可选）；null 表示不显示进度文案。 */
     knownTotal: Int? = null,
@@ -118,13 +120,28 @@ fun TrackListScreen(
     val colors = LocalShadeColors.current
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
-    var loaded by remember { mutableStateOf(false) }
+    // 进程内缓存：相同 cacheKey 二次进入直接显示上次结果（用户反馈"偶尔会重新加载"）。
+    val cachedTracks = remember(cacheKey) { TrackListCache.get(cacheKey) }
+    val cachedScroll = remember(cacheKey) { TrackListCache.scroll(cacheKey) }
+    var tracks by remember { mutableStateOf(cachedTracks ?: emptyList()) }
+    var loaded by remember { mutableStateOf(cachedTracks != null) }
     var failed by remember { mutableStateOf(false) }
-    var total by remember { mutableStateOf(knownTotal) }
+    var total by remember { mutableStateOf(TrackListCache.total(cacheKey) ?: knownTotal) }
     var loadingMore by remember { mutableStateOf(false) }
     var failedAt by remember { mutableStateOf<Int?>(null) } // 失败时的 offset，重试从这继续
-    val listState = rememberLazyListState()
+    // 滚动位置随缓存一起remember：手动页面栈下 rememberSaveable 会被销毁，
+    // 所以进入时从缓存取上次位置，离开时（DisposableEffect）写回。
+    val listState = rememberLazyListState(
+        initialFirstVisibleItemIndex = cachedScroll.first,
+        initialFirstVisibleItemScrollOffset = cachedScroll.second,
+    )
+    androidx.compose.runtime.DisposableEffect(cacheKey) {
+        onDispose {
+            TrackListCache.saveScroll(
+                cacheKey, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset,
+            )
+        }
+    }
     val likedIds by LikedStore.liked.collectAsState()
     val downloadedMap by DownloadStore.records.collectAsState()
 
@@ -173,6 +190,7 @@ fun TrackListScreen(
                 if (page.songs.size < pageSize) break
             }
             loaded = true
+            if (tracks.isNotEmpty()) TrackListCache.put(cacheKey, tracks, total)
             LikedStore.refresh()
         }
     }
@@ -200,7 +218,10 @@ fun TrackListScreen(
         }
     }
 
-    LaunchedEffect(title) { loadAll() }
+    // 有缓存就不再请求；无缓存才翻页取全。
+    LaunchedEffect(cacheKey) {
+        if (!loaded) loadAll()
+    }
 
     // 失败后「继续往下滑重新加载」：底部失败条进入可见区就自动续传一次。
     var retriedVisible by remember { mutableStateOf(false) }
@@ -356,6 +377,49 @@ fun TrackListScreen(
     }
     infoTrack?.let { TrackInfoDialog(it) { infoTrack = null } }
     formatTrack?.let { TrackFormatsDialog(it) { formatTrack = null } }
+}
+
+/**
+ * 详情列表的进程内缓存（歌单/专辑/我喜欢/电台共用）。
+ *
+ * 只缓存**已取全**的结果；超过 [MAX] 个条目时整体清空（条目都是小列表，粗暴但要够用）。
+ * 退出登录时由设置页调用 [clear]（收藏类数据与账号绑定）。
+ */
+object TrackListCache {
+    private const val MAX = 12
+
+    /** 已取全的曲目 + 总数 + 上次滚动位置（首项下标、像素偏移）。 */
+    private class Entry(
+        val tracks: List<Track>,
+        val total: Int?,
+        var scrollIndex: Int = 0,
+        var scrollOffset: Int = 0,
+    )
+
+    private val map = HashMap<String, Entry>()
+
+    fun get(key: String): List<Track>? = synchronized(map) { map[key]?.tracks }
+
+    /** 总数。 */
+    fun total(key: String): Int? = synchronized(map) { map[key]?.total }
+
+    /** 上次滚动位置（下标、偏移）。 */
+    fun scroll(key: String): Pair<Int, Int> =
+        synchronized(map) { map[key]?.let { it.scrollIndex to it.scrollOffset } ?: (0 to 0) }
+
+    fun put(key: String, tracks: List<Track>, total: Int?) {
+        synchronized(map) {
+            val old = map[key]
+            if (map.size >= MAX && old == null) map.clear()
+            map[key] = Entry(tracks, total, old?.scrollIndex ?: 0, old?.scrollOffset ?: 0)
+        }
+    }
+
+    fun saveScroll(key: String, index: Int, offset: Int) {
+        synchronized(map) { map[key]?.let { it.scrollIndex = index; it.scrollOffset = offset } }
+    }
+
+    fun clear() = synchronized(map) { map.clear() }
 }
 
 /** 列表底部状态：翻页中 / 已取全 / 失败（点击或滑到底重试）。 */
@@ -555,19 +619,25 @@ fun RadioScreen(onBack: () -> Unit, onOpenStation: (Int, String) -> Unit) {
                             ) { selected = i }
                         }
                     }
-                    LazyColumn(
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
-                    ) {
-                        item {
-                            TrackListBlock {
-                                list[idx].stations.forEachIndexed { i, s ->
-                                    if (i > 0) RowDivider(0.42f)
-                                    StationRow(s.title, s.listenDesc, s.picUrl) {
-                                        onOpenStation(s.id, s.title)
+                    val stationState = rememberLazyListState()
+                    Box(Modifier.fillMaxSize()) {
+                        LazyColumn(
+                            state = stationState,
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                        ) {
+                            item {
+                                TrackListBlock {
+                                    list[idx].stations.forEachIndexed { i, st ->
+                                        if (i > 0) RowDivider(0.42f)
+                                        StationRow(st.title, st.listenDesc, st.picUrl) {
+                                            onOpenStation(st.id, st.title)
+                                        }
                                     }
                                 }
                             }
                         }
+                        // 电台列表同样做边缘渐隐（与其它列表一致）
+                        VerticalEdgeFades(state = stationState, height = 26.dp)
                     }
                 }
             }
