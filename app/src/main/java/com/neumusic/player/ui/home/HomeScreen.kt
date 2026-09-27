@@ -64,18 +64,7 @@ import com.neumusic.player.data.LikedStore
 import com.neumusic.player.ui.common.doubleTapToTop
 import com.neumusic.player.ui.common.HorizontalEdgeFades
 import com.neumusic.player.ui.common.VerticalEdgeFades
-
-/** 主页二级目的地。null 表示停留在主页。 */
-sealed interface HomeDest {
-    data object Playlists : HomeDest
-    data object Albums : HomeDest
-    data object Radio : HomeDest
-    /** 「我喜欢」——直接进我喜欢列表（首页第一张卡片）。 */
-    data object Liked : HomeDest
-    data class PlaylistDetail(val tid: Long, val name: String, val songnum: Int? = null) : HomeDest
-    data class AlbumDetail(val mid: String, val name: String, val songnum: Int? = null) : HomeDest
-    data class RadioDetail(val id: Int, val title: String) : HomeDest
-}
+import com.neumusic.player.ui.Nav
 
 /** 随机问候语（未登录时用，不带用户名）。 */
 private val GREETINGS_NO_NAME = listOf(
@@ -111,7 +100,7 @@ private fun greetingForHour(hour: Int): String {
 fun HomeScreen(
     onOpenSearch: () -> Unit,
     onOpenSettings: () -> Unit,
-    onOpenDest: (HomeDest) -> Unit,
+    onOpenDest: (Nav) -> Unit,
 ) {
     val colors = LocalShadeColors.current
     val ctx = LocalContext.current
@@ -209,7 +198,7 @@ fun HomeScreen(
         item {
             Section(
                 title = "收藏的歌单",
-                onMore = { onOpenDest(HomeDest.Playlists) },
+                onMore = { onOpenDest(Nav.Playlists) },
                 // 「我喜欢」始终在，所以这一栏永远不为空；未登录时只显示它。
                 empty = false,
                 emptyText = "",
@@ -217,10 +206,10 @@ fun HomeScreen(
                 HomeCardRow {
                     // 「我喜欢」固定排第一（用户要求），再跟收藏的歌单。
                     item {
-                        LikedCard(likedCount) { onOpenDest(HomeDest.Liked) }
+                        LikedCard(likedCount) { onOpenDest(Nav.Liked) }
                     }
                     items(playlists) { p ->
-                        PlaylistCard(p) { onOpenDest(HomeDest.PlaylistDetail(p.tid, p.name, p.songnum)) }
+                        PlaylistCard(p) { onOpenDest(Nav.PlaylistDetail(p.tid, p.name, p.songnum)) }
                     }
                 }
             }
@@ -229,7 +218,7 @@ fun HomeScreen(
         item {
             Section(
                 title = "收藏的专辑",
-                onMore = { onOpenDest(HomeDest.Albums) },
+                onMore = { onOpenDest(Nav.Albums) },
                 empty = albums.isEmpty(),
                 emptyText = when {
                     !albumsLoaded -> "加载中…"
@@ -239,7 +228,7 @@ fun HomeScreen(
             ) {
                 HomeCardRow {
                     items(albums) { a ->
-                        AlbumCard(a) { onOpenDest(HomeDest.AlbumDetail(a.mid, a.name, a.songnum)) }
+                        AlbumCard(a) { onOpenDest(Nav.AlbumDetail(a.mid, a.name, a.songnum)) }
                     }
                 }
             }
@@ -261,7 +250,7 @@ fun HomeScreen(
                     HomeCardRow(spacing = 12.dp) {
                         items(g.stations) { s ->
                             StationCard(s.title, s.picUrl) {
-                                onOpenDest(HomeDest.RadioDetail(s.id, s.title))
+                                onOpenDest(Nav.RadioDetail(s.id, s.title))
                             }
                         }
                     }

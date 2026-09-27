@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -24,7 +23,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -41,15 +39,12 @@ import com.neumusic.player.data.Downloader
 import com.neumusic.player.data.LikedStore
 import com.neumusic.player.data.PlaylistItem
 import com.neumusic.player.data.Prefs
-import com.neumusic.player.data.RadioGroup
 import com.neumusic.player.data.Track
 import com.neumusic.player.data.api.LikeResult
 import com.neumusic.player.data.api.PlaylistApi
 import com.neumusic.player.data.api.RadioApi
 import com.neumusic.player.data.api.SongApi
 import com.neumusic.player.shade.LocalShadeColors
-import com.neumusic.player.shade.ShadeFusedTab
-import com.neumusic.player.shade.ShadeFusedTabs
 import com.neumusic.player.shade.flatPressable
 import com.neumusic.player.shade.shadePressable
 import com.neumusic.player.ui.common.AlbumArt
@@ -579,87 +574,6 @@ private fun ListRow(title: String, subtitle: String, logo: String, onClick: () -
         Column(Modifier.weight(1f)) {
             Text(title, color = colors.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1)
             Text(subtitle, color = colors.textSecondary, fontSize = 12.sp)
-        }
-    }
-}
-
-/**
- * 电台页：标签栏与列表融合（设计图 sample_1）。
- * 标签 = 电台分组（热门 / 心情 …），切换时列表换成分组内的电台。
- */
-@Composable
-fun RadioScreen(onBack: () -> Unit, onOpenStation: (Int, String) -> Unit) {
-    val colors = LocalShadeColors.current
-    var groups by remember { mutableStateOf<List<RadioGroup>?>(null) }
-    var selected by remember { mutableIntStateOf(0) }
-
-    LaunchedEffect(Unit) { groups = runCatching { RadioApi.groups() }.getOrDefault(emptyList()) }
-
-    Column(Modifier.fillMaxSize().background(colors.background)) {
-        DetailTopBar("电台", onBack)
-        val list = groups ?: return@Column LoadingBox()
-        if (list.isEmpty()) return@Column EmptyBox("电台加载失败，请稍后重试")
-
-        val idx = selected.coerceIn(0, list.lastIndex)
-        Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-            ShadeFusedTabs(
-                tabCount = list.size,
-                selectedIndex = idx,
-                tabHeight = 48.dp,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Column(Modifier.fillMaxSize()) {
-                    // 标签行：高度必须与 tabHeight 一致，缺口才对得齐。
-                    Row(Modifier.fillMaxWidth().height(48.dp)) {
-                        list.forEachIndexed { i, g ->
-                            ShadeFusedTab(
-                                label = g.title,
-                                selected = i == idx,
-                                modifier = Modifier.weight(1f),
-                            ) { selected = i }
-                        }
-                    }
-                    val stationState = rememberLazyListState()
-                    Box(Modifier.fillMaxSize()) {
-                        LazyColumn(
-                            state = stationState,
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
-                        ) {
-                            item {
-                                TrackListBlock {
-                                    list[idx].stations.forEachIndexed { i, st ->
-                                        if (i > 0) RowDivider(0.42f)
-                                        StationRow(st.title, st.listenDesc, st.picUrl) {
-                                            onOpenStation(st.id, st.title)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        // 电台列表同样做边缘渐隐（与其它列表一致）
-                        VerticalEdgeFades(state = stationState, height = 26.dp)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun StationRow(title: String, desc: String, pic: String, onClick: () -> Unit) {
-    val colors = LocalShadeColors.current
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .flatPressable(cornerRadius = 16.dp, onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        AlbumArt(url = pic, size = 46.dp, corner = 12.dp)
-        Column(Modifier.weight(1f)) {
-            Text(title, color = colors.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-            if (desc.isNotEmpty()) Text(desc, color = colors.textSecondary, fontSize = 11.sp, maxLines = 1)
         }
     }
 }

@@ -23,9 +23,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
@@ -35,7 +34,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
-import com.neumusic.player.data.DownloadStore
 import com.neumusic.player.data.Prefs
 import com.neumusic.player.data.api.PlaylistApi
 import com.neumusic.player.data.api.RadioApi
@@ -43,16 +41,15 @@ import com.neumusic.player.player.PlayerHost
 import com.neumusic.player.player.VizHost
 import com.neumusic.player.shade.LocalShadeColors
 import com.neumusic.player.shade.flatPressable
-import com.neumusic.player.shade.shadePressable
+import com.neumusic.player.shade.shadeInset
 import com.neumusic.player.shade.shadeSurface
 import com.neumusic.player.ui.common.AlbumArt
 import com.neumusic.player.ui.common.loadUrl
 import com.neumusic.player.ui.home.AlbumsScreen
-import com.neumusic.player.ui.home.HomeDest
 import com.neumusic.player.ui.home.HomeScreen
 import com.neumusic.player.ui.home.PlaylistsScreen
-import com.neumusic.player.ui.home.RadioScreen
 import com.neumusic.player.ui.home.TrackListScreen
+import com.neumusic.player.ui.player.EqualizerScreen
 import com.neumusic.player.ui.player.PlayerScreen
 import com.neumusic.player.ui.search.SearchScreen
 import com.neumusic.player.ui.settings.SettingsScreen
@@ -60,119 +57,104 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import com.neumusic.player.shade.shadeInset
 
-/** 主页之外的页面（无导航条，靠页面内的凸起返回按钮回主页）。 */
-private sealed interface Page {
-    data object Home : Page
-    data object Search : Page
-    data object Settings : Page
-    data class Playlists(val noArg: Int = 0) : Page
-    data class Albums(val noArg: Int = 0) : Page
-    data object Radio : Page
-    /** 均衡器（播放页顶栏进入）。 */
-    data object Equalizer : Page
-    /** 「我喜欢」列表（首页「收藏的歌单」第一张卡片）。 */
-    data object Liked : Page
-    data class PlaylistDetail(val tid: Long, val name: String, val songnum: Int? = null) : Page
-    data class AlbumDetail(val mid: String, val name: String, val songnum: Int? = null) : Page
-    data class RadioDetail(val id: Int, val title: String) : Page
-}
-
+/**
+ * 页面栈根节点（无导航条）。
+ *
+ * 页面栈是 [Nav] 的列表：**所有返回入口都只弹出栈顶**，所以「从哪来就回哪去」
+ * 对任何进入方式都成立（同一页面可能有多个来源）。栈底是主页，栈只剩主页时
+ * 把返回交还系统（退出 App）。
+ *
+ * 播放页是全屏覆盖层而非普通页面：它压在当前页面之上，`translationY` 由是否处于
+ * 栈顶驱动；均衡器等页面则可以压在播放页之上，返回时播放页原样回来。
+ */
 @Composable
 fun AppRoot() {
     val colors = LocalShadeColors.current
-    var page by remember { mutableStateOf<Page>(Page.Home) }
-    var playerOpen by remember { mutableStateOf(false) }
+    val stack = remember { mutableStateListOf<Nav>(Nav.Home) }
+
+    fun open(dest: Nav) {
+        stack.add(dest)
+    }
+
+    // 弹出栈顶。栈底（主页）不弹——交还系统处理（退出 App）。
+    fun back() {
+        if (stack.size > 1) stack.removeAt(stack.lastIndex)
+    }
 
     // 让 PlayerHost 能取链（播放器不直接依赖网络层）。
     LaunchedEffect(Unit) {
         PlayerHost.resolveUrl = { track -> loadUrl(track) }
     }
 
-    // 系统返回键：先收播放页，再回主页；已在主页则交还系统（退出）。
-    // 页面栈是手写的，不接 BackHandler 的话在二级页按返回会直接退出 App。
-    androidx.activity.compose.BackHandler(
-        enabled = playerOpen || page != Page.Home,
-    ) {
-        if (playerOpen) playerOpen = false else page = Page.Home
-    }
+    androidx.activity.compose.BackHandler(enabled = stack.size > 1) { back() }
 
-    // 0 = 播放页完全在屏幕下方（隐藏）；1 = 完全覆盖主页。
+    val top = stack.last()
+    val playerOpen = top == Nav.Player
+    // 播放页之下那一层才是要渲染的页面（播放页盖在它上面）。
+    val page = if (playerOpen) stack.lastOrNull { it != Nav.Player } ?: Nav.Home else top
+
+    // 0 = 播放页完全在屏幕下方（隐藏）；1 = 完全覆盖。
     val slide by animateFloatAsState(if (playerOpen) 1f else 0f, tween(320), label = "playerSlide")
     val screenH = with(LocalDensity.current) { 900.dp.toPx() }
 
     Box(Modifier.fillMaxSize().background(colors.background)) {
-        // ── 底层：主页面栈 ──
+        // ── 底层：当前页面 ──
         Box(Modifier.fillMaxSize().statusBarsPadding()) {
-            when (val p = page) {
-                Page.Home -> HomeScreen(
-                    onOpenSearch = { page = Page.Search },
-                    onOpenSettings = { page = Page.Settings },
-                    onOpenDest = { dest ->
-                        page = when (dest) {
-                            HomeDest.Playlists -> Page.Playlists()
-                            HomeDest.Albums -> Page.Albums()
-                            HomeDest.Radio -> Page.Radio
-                            HomeDest.Liked -> Page.Liked
-                            is HomeDest.PlaylistDetail -> Page.PlaylistDetail(dest.tid, dest.name, dest.songnum)
-                            is HomeDest.AlbumDetail -> Page.AlbumDetail(dest.mid, dest.name, dest.songnum)
-                            is HomeDest.RadioDetail -> Page.RadioDetail(dest.id, dest.title)
-                        }
-                    },
+            when (page) {
+                Nav.Home -> HomeScreen(
+                    onOpenSearch = { open(Nav.Search) },
+                    onOpenSettings = { open(Nav.Settings) },
+                    onOpenDest = { dest -> open(dest) },
                 )
-                Page.Search -> SearchScreen(
-                    onBack = { page = Page.Home },
-                    onOpenAlbum = { page = Page.AlbumDetail(it.mid, it.name, it.songnum) },
+                Nav.Search -> SearchScreen(
+                    onBack = { back() },
+                    onOpenAlbum = { open(Nav.AlbumDetail(it.mid, it.name, it.songnum)) },
                 )
-                Page.Settings -> SettingsScreen(onBack = { page = Page.Home })
-                is Page.Playlists -> PlaylistsScreen(
-                    onBack = { page = Page.Home },
-                    onOpen = { page = Page.PlaylistDetail(it.tid, it.name, it.songnum) },
+                Nav.Settings -> SettingsScreen(onBack = { back() })
+                Nav.Playlists -> PlaylistsScreen(
+                    onBack = { back() },
+                    onOpen = { open(Nav.PlaylistDetail(it.tid, it.name, it.songnum)) },
                 )
-                is Page.Albums -> AlbumsScreen(
-                    onBack = { page = Page.Home },
-                    onOpen = { page = Page.AlbumDetail(it.mid, it.name, it.songnum) },
+                Nav.Albums -> AlbumsScreen(
+                    onBack = { back() },
+                    onOpen = { open(Nav.AlbumDetail(it.mid, it.name, it.songnum)) },
                 )
-                Page.Radio -> RadioScreen(
-                    onBack = { page = Page.Home },
-                    onOpenStation = { id, title -> page = Page.RadioDetail(id, title) },
-                )
-                Page.Equalizer -> com.neumusic.player.ui.player.EqualizerScreen(
-                    onBack = { page = Page.Home },
-                )
-                is Page.Liked -> TrackListScreen(
-                    title = "我喜欢", onBack = { page = Page.Home },
+                Nav.Liked -> TrackListScreen(
+                    title = "我喜欢", onBack = { back() },
                     cacheKey = "liked",
                     loadPage = { off, num -> PlaylistApi.likedPage(off, num) },
-                    onOpenAlbum = { t -> page = Page.AlbumDetail(t.albumMid, t.albumName) },
+                    onOpenAlbum = { t -> open(Nav.AlbumDetail(t.albumMid, t.albumName)) },
                 )
-                is Page.PlaylistDetail -> TrackListScreen(
-                    title = p.name, onBack = { page = Page.Playlists() },
-                    cacheKey = "playlist:${p.tid}",
-                    knownTotal = p.songnum,
-                    loadPage = { off, num -> PlaylistApi.playlistPage(p.tid, off, num) },
-                    onOpenAlbum = { t -> page = Page.AlbumDetail(t.albumMid, t.albumName) },
+                Nav.Equalizer -> EqualizerScreen(onBack = { back() })
+                is Nav.PlaylistDetail -> TrackListScreen(
+                    title = page.name, onBack = { back() },
+                    cacheKey = "playlist:${page.tid}",
+                    knownTotal = page.songnum,
+                    loadPage = { off, num -> PlaylistApi.playlistPage(page.tid, off, num) },
+                    onOpenAlbum = { t -> open(Nav.AlbumDetail(t.albumMid, t.albumName)) },
                 )
-                is Page.AlbumDetail -> TrackListScreen(
-                    title = p.name, onBack = { page = Page.Albums() },
-                    cacheKey = "album:${p.mid}",
-                    knownTotal = p.songnum,
-                    loadPage = { off, num -> PlaylistApi.albumPage(p.mid, off, num) },
-                    onOpenAlbum = { t -> page = Page.AlbumDetail(t.albumMid, t.albumName) },
+                is Nav.AlbumDetail -> TrackListScreen(
+                    title = page.name, onBack = { back() },
+                    cacheKey = "album:${page.mid}",
+                    knownTotal = page.songnum,
+                    loadPage = { off, num -> PlaylistApi.albumPage(page.mid, off, num) },
+                    onOpenAlbum = { t -> open(Nav.AlbumDetail(t.albumMid, t.albumName)) },
                 )
-                is Page.RadioDetail -> TrackListScreen(
-                    title = p.title, onBack = { page = Page.Radio },
-                    cacheKey = "radio:${p.id}",
+                is Nav.RadioDetail -> TrackListScreen(
+                    title = page.title, onBack = { back() },
+                    cacheKey = "radio:${page.id}",
                     // 电台没有总数概念，一次取一大页即可。
                     loadPage = { off, num ->
                         PlaylistApi.Page(
-                            songs = RadioApi.tracks(p.id, num = if (off == 0) 200 else 0) ?: emptyList(),
+                            songs = RadioApi.tracks(page.id, num = if (off == 0) 200 else 0) ?: emptyList(),
                             total = null,
                         )
                     },
-                    onOpenAlbum = { t -> page = Page.AlbumDetail(t.albumMid, t.albumName) },
+                    onOpenAlbum = { t -> open(Nav.AlbumDetail(t.albumMid, t.albumName)) },
                 )
+                // 播放页只作为覆盖层出现，正常情况下不会是 `page`；兜底不渲染底层内容。
+                Nav.Player -> Unit
             }
         }
 
@@ -180,7 +162,7 @@ fun AppRoot() {
         val current by PlayerHost.current.collectAsState()
         if (current != null) {
             MiniPlayerBar(
-                onOpen = { playerOpen = true },
+                onOpen = { if (stack.last() != Nav.Player) open(Nav.Player) },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .graphicsLayer {
@@ -204,11 +186,8 @@ fun AppRoot() {
                     },
             ) {
                 PlayerScreen(
-                    onBack = { playerOpen = false },
-                    onOpenEqualizer = {
-                        playerOpen = false
-                        page = Page.Equalizer
-                    },
+                    onBack = { back() },
+                    onOpenEqualizer = { open(Nav.Equalizer) },
                 )
             }
         }

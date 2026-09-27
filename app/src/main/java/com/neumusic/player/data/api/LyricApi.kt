@@ -194,10 +194,15 @@ object LyricApi {
 
     /**
      * 解析 QRC XML：取出 `LyricContent`（CDATA 或属性形式），逐行
-     * `[行起始,行时长]字(相对起,时长)字(相对起,时长)…` → 带逐字时间的 [LyricLine]。
+     * `[行起始,行时长]字(起,时长)字(起,时长)…` → 带逐字时间的 [LyricLine]。
      *
-     * QRC 的字偏移是**相对行首**的毫秒，这里换算成绝对时间；
      * 元信息行（`[ti:]` 等，不含 `[数字,数字]`）自然被 LINE_RE 过滤掉。
+     *
+     * ⚠️ **字时间是绝对毫秒，不是相对行首**。实测（Five Hundred Miles）：
+     * 第 2 行是 `[5670,5670]Lyrics(5670,378) (6048,378)by(6426,378)…`——首字时间就是行起点
+     * 而非 0。早前一律按 `lineStart + 字偏移` 换算，于是**除第一行（lineStart=0）外**
+     * 每行的字时间都被推后一整个行起点，扫色计算判定成「还没唱」而恒为 0，
+     * 表现为「只有第一句歌词有扫色」。这里先判别基准（兼容相对时间的变体）再换算。
      */
     private fun parseQrcXml(xml: String): List<LyricLine> {
         val content = CDATA_RE.find(xml)?.groupValues?.get(1)
@@ -211,27 +216,35 @@ object LyricApi {
         val out = ArrayList<LyricLine>()
         for (m in LINE_RE.findAll(body)) {
             val lineStart = m.groupValues[1].toLongOrNull() ?: continue
+            val lineDur = m.groupValues[2].toLongOrNull() ?: 0L
             val payload = m.groupValues[3]
 
-            val words = ArrayList<LyricWord>()
-            val textSb = StringBuilder()
+            // 先原样收，再定基准。
+            val raw = ArrayList<QrcWord>()   // 时间含义待定的字（见下）
             var idx = 0
             while (idx < payload.length) {
                 val wm = WORD_RE.find(payload, idx) ?: break
                 val wordText = payload.substring(idx, wm.range.first)
                 val ws = wm.groupValues[1].toLongOrNull() ?: 0L
                 val wd = wm.groupValues[2].toLongOrNull() ?: 0L
-                if (wordText.isNotEmpty()) {
-                    val start = lineStart + ws
-                    words.add(LyricWord(wordText, start, start + wd))
-                    textSb.append(wordText)
-                }
+                if (wordText.isNotEmpty()) raw.add(QrcWord(wordText, ws, wd))
                 idx = wm.range.last + 1
             }
-            val text = textSb.toString().trim()
+            if (raw.isEmpty()) continue
+            val text = raw.joinToString("") { it.text }.trim()
             if (text.isEmpty()) continue
+
+            // 相对时间的行，字时间不会超出该行时长；超出即说明本来就是绝对时间。
+            val absolute = raw.maxOf { it.at + it.dur } > lineDur + 500L
+            val words = raw.map { w ->
+                val start = if (absolute) w.at else lineStart + w.at
+                LyricWord(w.text, start, start + w.dur)
+            }
             out.add(LyricLine(timeMs = lineStart, text = text, words = words))
         }
         return out.sortedBy { it.timeMs }
     }
+
+    /** QRC 原始字：`at`/`dur` 的含义（绝对或相对行首）由整行判别后确定。 */
+    private data class QrcWord(val text: String, val at: Long, val dur: Long)
 }
