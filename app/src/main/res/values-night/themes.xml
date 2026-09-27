@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 深色下的窗口底色，避免启动瞬间闪白（Compose 内容会整屏覆盖它）。 -->
+    <style name="Theme.NeuMusic" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowBackground">#FF303234</item>
+    </style>
+</resources>
