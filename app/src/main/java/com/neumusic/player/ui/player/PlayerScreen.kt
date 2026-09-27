@@ -108,6 +108,13 @@ fun PlayerScreen(onBack: () -> Unit, onOpenEqualizer: () -> Unit = {}) {
     val playing by PlayerHost.isPlaying.collectAsState()
     val liked by PlayerHost.liked.collectAsState()
     val lyrics by PlayerHost.lyrics.collectAsState()
+
+    // 可视化电平：FFT（Visualizer）优先；模拟器等无实现时回退 PCM 电平。
+    // 之前 CoverDisc 只订阅 VizHost.levels，回退场景下恒为零（"频谱环没效果"的原因）。
+    val usingFft by VizHost.usingFft.collectAsState()
+    val fftLevels by VizHost.levels.collectAsState()
+    val pcmLevels by PlayerHost.vizProcessor.levels.collectAsState()
+    val vizLevels = if (usingFft) fftLevels else pcmLevels
     val lyricSize by Prefs.lyricSizeFlow.collectAsState()
     val transPref by Prefs.lyricTransFlow.collectAsState()
     // 本地副本，便于页面上的按钮即时切换（同时写回设置）。
@@ -178,6 +185,7 @@ fun PlayerScreen(onBack: () -> Unit, onOpenEqualizer: () -> Unit = {}) {
                     singer = track?.singer.orEmpty(),
                     coverUrl = track?.coverUrl.orEmpty(),
                     playing = playing,
+                    levels = vizLevels,
                 )
             } else {
                 LyricsView(
@@ -409,6 +417,7 @@ private fun CoverPage(
     singer: String,
     coverUrl: String,
     playing: Boolean,
+    levels: FloatArray,
 ) {
     val colors = LocalShadeColors.current
     Column(
@@ -420,6 +429,7 @@ private fun CoverPage(
             coverUrl = coverUrl,
             frac = 0f,
             playing = playing,
+            levels = levels,
             onDragStart = {},
             onDrag = {},
             onDragEnd = {},
@@ -461,12 +471,12 @@ private fun CoverDisc(
     coverUrl: String,
     frac: Float,
     playing: Boolean,
+    levels: FloatArray,
     onDragStart: () -> Unit,
     onDrag: (Float) -> Unit,
     onDragEnd: () -> Unit,
 ) {
     val colors = LocalShadeColors.current
-    val levels by VizHost.levels.collectAsState()
     val animatedFrac by animateFloatAsState(frac, tween(160), label = "ringFrac")
     val ringMaxLen = RING_MAX_LEN
 
