@@ -56,7 +56,9 @@ import com.neumusic.player.data.Prefs
 import com.neumusic.player.data.Track
 import com.neumusic.player.data.api.SongApi
 import com.neumusic.player.player.PlayerHost
+import com.neumusic.player.shade.BlockSlice
 import com.neumusic.player.shade.LocalShadeColors
+import com.neumusic.player.shade.blockSlice
 import com.neumusic.player.shade.flatPressable
 import com.neumusic.player.shade.shadeInset
 import com.neumusic.player.shade.shadeSurface
@@ -113,84 +115,18 @@ fun RowDivider(widthFraction: Float = 0.52f) {
     }
 }
 
-/** 行在整块凸面里的位置：决定圆角与阴影条画在哪。 */
-enum class BlockRowPosition { Head, Middle, Tail, Single }
-
 /**
- * 虚拟化友好的「整块凸面」行容器。
- *
- * 曲目列表可能几百行：把整块画在一个 LazyColumn item 里，组合/排版/光栅全都随行数
- * 线性膨胀，进出二级页随歌单越大越卡（实测）。改为**每行一个列表项、各画一小片**：
- * 行与行同色 butt-join 成一整块，圆角只出现在块首/块尾，阴影拆成
- * 「左亮/右暗」竖向渐变条与块尾暗带——渐变代替整块 BlurMaskFilter，
- * 成本只与可见行数相关。
+ * 「整块凸面」的逐行容器：绘制见 [com.neumusic.player.shade.blockSlice]
+ * （每行画自己那一片，虚拟化友好；阴影透明度由转场逐帧驱动）。
+ * 块的 6dp 上下内缩由调用方在首/尾行的内容里补 Spacer。
  */
 @Composable
 fun BlockRowSurface(
-    position: BlockRowPosition,
+    position: BlockSlice,
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
-    val colors = LocalShadeColors.current
-    val relief = LocalReliefScale.current
-    val strip = (9f * relief).dp
-    val rounded = when (position) {
-        BlockRowPosition.Head -> RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)
-        BlockRowPosition.Tail -> RoundedCornerShape(bottomStart = 22.dp, bottomEnd = 22.dp)
-        BlockRowPosition.Single -> RoundedCornerShape(22.dp)
-        BlockRowPosition.Middle -> RectangleShape
-    }
-    Column(modifier.fillMaxWidth()) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .then(if (rounded == RectangleShape) Modifier else Modifier.clip(rounded))
-                .background(colors.background)
-                .drawBehind {
-                    // 骑缝软渐变：峰值在块边缘，向外向内各淡出一半（blurs 的等效近似）。
-                    // Middle 行不裁剪，允许画出界外；相邻行画的是同一条渐变，接缝无痕。
-                    val w = strip.toPx()
-                    val h = size.height
-                    fun edgeBrush(inner: Color, color: Color): Brush = Brush.horizontalGradient(
-                        0f to color.copy(alpha = 0f),
-                        0.5f to color.copy(alpha = 0.55f),
-                        1f to inner.copy(alpha = 0f),
-                    )
-                    val half = w / 2f
-                    drawRect(
-                        brush = edgeBrush(colors.background, colors.shadowLight),
-                        topLeft = Offset(-half, 0f),
-                        size = Size(w, h),
-                    )
-                    drawRect(
-                        brush = Brush.horizontalGradient(
-                            0f to colors.shadowDark.copy(alpha = 0f),
-                            0.5f to colors.shadowDark.copy(alpha = 0.55f),
-                            1f to colors.background.copy(alpha = 0f),
-                        ),
-                        topLeft = Offset(size.width - half, 0f),
-                        size = Size(w, h),
-                    )
-                },
-        ) { content() }
-        if (position == BlockRowPosition.Tail || position == BlockRowPosition.Single) {
-            // 块尾下方的投影带（down-offset 阴影露出块外的部分）
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(strip)
-                    .padding(start = 6.dp, end = 6.dp)
-                    .drawBehind {
-                        drawRect(
-                            brush = Brush.verticalGradient(
-                                0f to colors.shadowDark.copy(alpha = 0.5f),
-                                1f to colors.shadowDark.copy(alpha = 0f),
-                            ),
-                        )
-                    },
-            )
-        }
-    }
+    Box(modifier.fillMaxWidth().blockSlice(position)) { content() }
 }
 
 /**

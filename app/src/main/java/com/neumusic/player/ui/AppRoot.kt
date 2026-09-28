@@ -313,7 +313,6 @@ fun AppRoot() {
             SecondPageOverlay(
                 entry = morphEntry,
                 progress = zoomAnimatable.asState(),
-                steady = zoomSteady,
                 onOpen = openCb,
                 onBack = backCb,
             )
@@ -386,18 +385,28 @@ private fun PageContent(
             loadPage = { off, num -> PlaylistApi.albumPage(nav.mid, off, num) },
             onOpenAlbum = { t -> onOpen(NavRequest(Nav.AlbumDetail(t.albumMid, t.albumName))) },
         ) }
-        is Nav.RadioDetail -> key("radio:${nav.id}") { TrackListScreen(
-            title = nav.title, onBack = onBack,
-            cacheKey = "radio:${nav.id}",
-            // 电台没有总数概念，一次取一大页即可。
-            loadPage = { off, num ->
-                PlaylistApi.Page(
-                    songs = RadioApi.tracks(nav.id, num = if (off == 0) 200 else 0) ?: emptyList(),
-                    total = null,
-                )
-            },
-            onOpenAlbum = { t -> onOpen(NavRequest(Nav.AlbumDetail(t.albumMid, t.albumName))) },
-        ) }
+        is Nav.RadioDetail -> key("radio:${nav.id}") {
+            // 电台是**无限流**：接口每批只给 5 首且每次都不同（实测），
+            // 这里按调用累积去重，每次给约 20 首，由列表滚动到底时继续取。
+            // 已见 mid 集合从缓存播种：重进同一电台时 firstplay/去重都基于已缓存内容
+            val seen = remember(nav.id) {
+                mutableSetOf<String>().apply {
+                    com.neumusic.player.ui.home.TrackListCache.get("radio:${nav.id}")?.forEach { add(it.mid) }
+                }
+            }
+            TrackListScreen(
+                title = nav.title, onBack = onBack,
+                cacheKey = "radio:${nav.id}",
+                endless = true,
+                loadPage = { _, _ ->
+                    val first = seen.isEmpty()
+                    val batch = RadioApi.nextTracks(nav.id, firstplay = first, exclude = seen)
+                    seen.addAll(batch.map { it.mid })
+                    PlaylistApi.Page(songs = batch, total = null)
+                },
+                onOpenAlbum = { t -> onOpen(NavRequest(Nav.AlbumDetail(t.albumMid, t.albumName))) },
+            )
+        }
         // 播放页只作为覆盖层出现，正常情况下不会走到这里；兜底不渲染。
         Nav.Player -> Unit
     }
@@ -414,23 +423,20 @@ private fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t
 private fun SecondPageOverlay(
     entry: StackEntry,
     progress: androidx.compose.runtime.State<Float>,
-    steady: Boolean,
     onOpen: (NavRequest) -> Unit,
     onBack: () -> Unit,
 ) {
     val colors = LocalShadeColors.current
-    if (steady) {
-        Box(Modifier.fillMaxSize().zIndex(3f).background(colors.background).statusBarsPadding()) {
-            PageContent(nav = entry.nav, onOpen = onOpen, onBack = onBack)
-        }
-        return
-    }
+    // **单一实例**：飞行段与落定态共用同一个 PageContent 子树（只靠图层 alpha 差异）。
+    // 早期版本按 steady 切换两个分支——落定瞬间飞行实例被销毁，列表的加载协程随
+    // rememberCoroutineScope 一起取消，新实例从头再拉，表现为列表偶发空白（实测踩过）。
     val showContent by remember { derivedStateOf { progress.value > 0.05f } }
     if (!showContent) return
     Box(
         Modifier
             .fillMaxSize()
             .zIndex(3f)
+            .background(colors.background)   // 必须盖到状态栏区域：否则淡入时透出放大的卡片封面（实测踩过）
             .statusBarsPadding()
             .graphicsLayer {
                 val a = ((progress.value - 0.75f) / 0.25f).coerceIn(0f, 1f)

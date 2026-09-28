@@ -43,6 +43,7 @@ import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.asAndroidPath
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.nativeCanvas
@@ -246,6 +247,78 @@ fun Modifier.shadeInset(cornerRadius: Dp = 16.dp, offset: Dp = 4.dp, blur: Dp = 
         drawShade(cornerRadius.toPx(), colors.background,
             outerAlpha = 0f, innerAlpha = shadowAlpha.floatValue.coerceIn(0f, 1f), innerStrength = 1f,
             colors = colors, offsetPx = offset.toPx() * relief, blurPx = blur.toPx() * relief)
+    }
+}
+
+/** 「整块凸面」切片的行位：决定圆角与投影出现在哪一端。 */
+enum class BlockSlice { Head, Middle, Tail, Single }
+
+/**
+ * 「整块凸面」的**逐行切片**：虚拟化列表里每行画自己那一片。
+ *
+ * 曲目列表几百行时不能把整块画进一个 item（组合/排版/光栅随行数线性膨胀）。
+ * 每行的阴影用**纵向外延的整块轮廓**做模糊，再按行位垂直裁剪：
+ * Middle 行的上下边缘落在模糊的内部（外延部分被裁掉/被相邻行盖住），整块浑然一体；
+ * Head/Tail 露出真实的圆角，块尾的投影向下露出。左右投影随行裁剪窗口自然连续。
+ * 阴影透明度逐帧读 [LocalShadeShadowAlpha]（转场期淡出，只重绘不重组）。
+ */
+@Composable
+fun Modifier.blockSlice(
+    position: BlockSlice,
+    cornerRadius: Dp = 22.dp,
+    offset: Dp = 6.dp,
+    blur: Dp = 10.dp,
+): Modifier {
+    val colors = LocalShadeColors.current
+    val relief = LocalReliefScale.current
+    val shadowAlpha = LocalShadeShadowAlpha.current
+    return this.drawBehind {
+        val w = size.width
+        val h = size.height
+        val off = offset.toPx() * relief
+        val blurPx = blur.toPx() * relief
+        val ext = blurPx * 2.5f + off + 2.dp.toPx()   // 纵向外延：裁剪窗口内不能出现局部模糊边
+        val corner = cornerRadius.toPx()
+        val isHead = position == BlockSlice.Head || position == BlockSlice.Single
+        val isTail = position == BlockSlice.Tail || position == BlockSlice.Single
+        clipRect(left = -ext, top = if (isHead) -ext else 0f, right = w + ext, bottom = if (isTail) h + ext else h) {
+            if (shadowAlpha.floatValue > 0.02f) {
+                val a = shadowAlpha.floatValue.coerceIn(0f, 1f)
+                // 双影的切片矩形**方向不对称**：
+                // 暗影 offset 向下 → 它的底边就是块尾的真实投影，纵向向下外延；
+                // 亮影 offset 向上 → 它的顶边是块首的真实受光，纵向向上外延。
+                // 反向外延会让对侧漏出一大坨模糊（实测"一大坨光影糊在顶部/底部"）。
+                val darkSlice = Path().apply {
+                    addRoundRect(
+                        RoundRect(0f, if (isHead) 0f else -ext, w, if (isTail) h else h + ext),
+                    )
+                }
+                val lightSlice = Path().apply {
+                    addRoundRect(
+                        RoundRect(0f, if (isHead) 0f else -ext, w, h),
+                    )
+                }
+                drawIntoCanvas { canvas ->
+                    drawOffsetPath(canvas, lightSlice, -off, -off, nativePaint(colors.shadowLight, a, blurPx))
+                    drawOffsetPath(canvas, darkSlice, off, off, nativePaint(colors.shadowDark, a, blurPx))
+                }
+            }
+            val r = CornerRadius(corner, corner)
+            val z = CornerRadius.Zero
+            val fill = Path().apply {
+                addRoundRect(
+                    when (position) {
+                        BlockSlice.Head -> RoundRect(androidx.compose.ui.geometry.Rect(0f, 0f, w, h), topLeft = r, topRight = r, bottomRight = z, bottomLeft = z)
+                        BlockSlice.Tail -> RoundRect(androidx.compose.ui.geometry.Rect(0f, 0f, w, h), topLeft = z, topRight = z, bottomRight = r, bottomLeft = r)
+                        BlockSlice.Single -> RoundRect(0f, 0f, w, h, r)
+                        BlockSlice.Middle -> RoundRect(0f, 0f, w, h, z)
+                    }
+                )
+            }
+            drawIntoCanvas { canvas ->
+                canvas.nativeCanvas.drawPath(fill.asAndroidPath(), nativePaint(colors.background, 1f, 0f))
+            }
+        }
     }
 }
 

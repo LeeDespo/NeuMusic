@@ -53,7 +53,7 @@ import com.neumusic.player.shade.shadePressable
 import com.neumusic.player.ui.common.AlbumArt
 import com.neumusic.player.ui.common.RowDivider
 import com.neumusic.player.ui.common.BlockRowSurface
-import com.neumusic.player.ui.common.BlockRowPosition
+import com.neumusic.player.shade.BlockSlice
 import com.neumusic.player.ui.common.TrackListBlock
 import com.neumusic.player.ui.common.VerticalEdgeFades
 import com.neumusic.player.ui.common.TrackRow
@@ -112,6 +112,12 @@ fun TrackListScreen(
     loadPage: suspend (offset: Int, num: Int) -> PlaylistApi.Page,
     /** 总数已知时的提示（可选）；null 表示不显示进度文案。 */
     knownTotal: Int? = null,
+    /**
+     * **无限流**（电台、猜你喜欢这类没有"总数/到底"概念的来源）：为 true 时
+     * 首屏只取一块，滚动到底部自动调 [loadPage] 追加，直到它返回空表为止。
+     * 为 false（默认）时沿用"翻页取全"。
+     */
+    endless: Boolean = false,
     /** 「更多 → 查看专辑」的跳转回调。 */
     onOpenAlbum: (Track) -> Unit = {},
 ) {
@@ -127,6 +133,9 @@ fun TrackListScreen(
     var total by remember { mutableStateOf(TrackListCache.total(cacheKey) ?: knownTotal) }
     var loadingMore by remember { mutableStateOf(false) }
     var failedAt by remember { mutableStateOf<Int?>(null) } // 失败时的 offset，重试从这继续
+    // 无限流：数据源已循环到底（loadPage 返回空）就不再请求
+    var exhausted by remember { mutableStateOf(false) }
+    val endlessMode = endless && total == null
     // 滚动位置随缓存一起remember：手动页面栈下 rememberSaveable 会被销毁，
     // 所以进入时从缓存取上次位置，离开时（DisposableEffect）写回。
     val listState = rememberLazyListState(
@@ -167,25 +176,39 @@ fun TrackListScreen(
         suspend {
             loaded = false
             failed = false
-            val pageSize = 100
-            var offset = 0
-            var guard = 0
-            while (guard++ < 50) {
+            if (endlessMode) {
+                // 无限流：首屏只取一块，剩下交给滚动触发的追加。
+                // 首屏失败**或为空**都按可重试失败处理（exhausted 只在"成功但全重复"时出现）
                 loadingMore = true
-                val page = fetchPage(offset, pageSize)
+                val page = fetchPage(0, 100)
                 loadingMore = false
-                if (page == null) {
-                    failedAt = offset
-                    break
+                if (page == null || page.songs.isEmpty()) {
+                    failedAt = 0
+                } else {
+                    failedAt = null
+                    tracks = tracks + page.songs.filter { new -> tracks.none { it.mid == new.mid } }
                 }
-                failedAt = null
-                total = page.total ?: total
-                if (page.songs.isEmpty()) break
-                tracks = tracks + page.songs.filter { new -> tracks.none { it.mid == new.mid } }
-                offset += pageSize
-                val t = total
-                if (t != null && tracks.size >= t) break
-                if (page.songs.size < pageSize) break
+            } else {
+                val pageSize = 100
+                var offset = 0
+                var guard = 0
+                while (guard++ < 50) {
+                    loadingMore = true
+                    val page = fetchPage(offset, pageSize)
+                    loadingMore = false
+                    if (page == null) {
+                        failedAt = offset
+                        break
+                    }
+                    failedAt = null
+                    total = page.total ?: total
+                    if (page.songs.isEmpty()) break
+                    tracks = tracks + page.songs.filter { new -> tracks.none { it.mid == new.mid } }
+                    offset += pageSize
+                    val t = total
+                    if (t != null && tracks.size >= t) break
+                    if (page.songs.size < pageSize) break
+                }
             }
             loaded = true
             if (tracks.isNotEmpty()) TrackListCache.put(cacheKey, tracks, total)
@@ -216,6 +239,26 @@ fun TrackListScreen(
         }
     }
 
+    // 无限流：滚动到底部（footer 可见）就追加下一块，直到数据源枯竭
+    suspend fun appendNext() {
+        if (!endlessMode || exhausted || failedAt != null) return
+        loadingMore = true
+        val page = fetchPage(tracks.size, 100)
+        loadingMore = false
+        if (page == null) {
+            failedAt = tracks.size
+            return
+        }
+        failedAt = null
+        val fresh = page.songs.filter { new -> tracks.none { it.mid == new.mid } }
+        if (fresh.isEmpty()) {
+            exhausted = true
+            return
+        }
+        tracks = tracks + fresh
+        TrackListCache.put(cacheKey, tracks, total)
+    }
+
     // 有缓存就不再请求；无缓存才翻页取全。
     LaunchedEffect(cacheKey) {
         if (!loaded) loadAll()
@@ -230,11 +273,15 @@ fun TrackListScreen(
             last.index == info.totalItemsCount - 1
         }
     }
-    LaunchedEffect(footerVisible, failedAt) {
-        if (footerVisible && failedAt != null && loaded && !loadingMore) {
-            if (retriedVisible) return@LaunchedEffect
-            retriedVisible = true
-            failedAt?.let { offset -> resumeFrom(offset) }
+    LaunchedEffect(footerVisible, failedAt, exhausted, endlessMode) {
+        if (footerVisible && loaded && !loadingMore) {
+            if (failedAt != null) {
+                if (retriedVisible) return@LaunchedEffect
+                retriedVisible = true
+                failedAt?.let { offset -> resumeFrom(offset) }
+            } else if (endlessMode && !exhausted) {
+                appendNext()
+            }
         }
         if (!footerVisible) retriedVisible = false
     }
@@ -242,80 +289,98 @@ fun TrackListScreen(
     Box(Modifier.fillMaxSize().background(colors.background)) {
         val list = tracks
         val downloadRot = downloadIconRotation(selecting)
-        when {
-            !loaded -> LoadingBox()
-            failed && list.isEmpty() -> EmptyBox("加载失败，请稍后重试")
-            list.isEmpty() -> EmptyBox("这里还没有歌曲")
-            else -> LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize().doubleTapToTop(listState),
-                contentPadding = PaddingValues(
-                    start = 16.dp, end = 16.dp,
-                    top = 8.dp,
-                    // 底部留白：让最后一行能滚到播放栏之上，而不是被压住。
-                    bottom = 132.dp,
-                ),
-            ) {
-                // 顶栏和主页一样是页面的一部分：往上滑就跟着滚走，不再悬浮折叠
-                item(key = "topbar") {
-                    ListTopBarRow(title, onBack) {
-                        Box(
-                            Modifier.size(42.dp)
-                                .graphicsLayer { rotationZ = downloadRot }
-                                .shadePressable(cornerRadius = 21.dp, offset = 4.dp, blur = 6.dp) {
-                                    selecting = !selecting
-                                    if (!selecting) selectedMids.clear()
-                                },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                Icons.Filled.Download, "选择下载",
-                                tint = colors.accent, modifier = Modifier.size(20.dp),
-                            )
-                        }
+        // LazyColumn 恒渲染：顶栏（返回键）属于页面本身，空列表/加载中也不能消失
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize().doubleTapToTop(listState),
+            contentPadding = PaddingValues(
+                start = 16.dp, end = 16.dp,
+                top = 8.dp,
+                // 底部留白：让最后一行能滚到播放栏之上，而不是被压住。
+                bottom = 132.dp,
+            ),
+        ) {
+            // 顶栏和主页一样是页面的一部分：往上滑就跟着滚走，不再悬浮折叠
+            item(key = "topbar") {
+                ListTopBarRow(title, onBack) {
+                    Box(
+                        Modifier.size(42.dp)
+                            .graphicsLayer { rotationZ = downloadRot }
+                            .shadePressable(cornerRadius = 21.dp, offset = 4.dp, blur = 6.dp) {
+                                selecting = !selecting
+                                if (!selecting) selectedMids.clear()
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.Download, "选择下载",
+                            tint = colors.accent, modifier = Modifier.size(20.dp),
+                        )
                     }
                 }
-                // 逐行 item：几百行的歌单也能虚拟化（整块一个 item 会随行数线性变卡）
-                itemsIndexed(list, key = { _, t -> t.mid }) { i, t ->
-                    val position = when {
-                        list.size == 1 -> BlockRowPosition.Single
-                        i == 0 -> BlockRowPosition.Head
-                        i == list.lastIndex -> BlockRowPosition.Tail
-                        else -> BlockRowPosition.Middle
-                    }
-                    BlockRowSurface(position = position) {
-                        Column {
-                            if (i > 0) RowDivider()
-                            TrackRow(
-                                track = t,
-                                onPlay = {
-                                    if (selecting) return@TrackRow
-                                    playQueue(ctx, list, i)
-                                },
-                                onMore = { moreTrack = t },
-                                liked = likedIds.contains(t.songId),
-                                onLike = { toggleLike(ctx, t, likedIds.contains(t.songId)) },
-                                selecting = selecting,
-                                selected = t.mid in selectedMids,
-                                downloaded = downloadedMap.containsKey(t.mid),
-                                onToggleSelect = {
-                                    if (t.mid in selectedMids) selectedMids.remove(t.mid)
-                                    else selectedMids.add(t.mid)
-                                },
-                            )
-                            if (i == 0) Spacer(Modifier.height(6.dp))
-                            if (i == list.lastIndex) Spacer(Modifier.height(6.dp))
-                        }
+            }
+            when {
+                !loaded -> item(key = "state") {
+                    Box(
+                        Modifier.fillMaxWidth().height(520.dp),
+                        contentAlignment = Alignment.Center,
+                    ) { LoadingBox() }
+                }
+                list.isEmpty() -> item(key = "state") {
+                    Box(
+                        Modifier.fillMaxWidth().height(520.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            if (failed) "加载失败，请稍后重试" else "这里还没有歌曲",
+                            color = colors.textTertiary, fontSize = 14.sp,
+                        )
                     }
                 }
-                item {
-                    ListFooter(
-                        loadedCount = list.size,
-                        total = total,
-                        loading = loadingMore,
-                        failedAt = failedAt,
-                        onRetry = { failedAt?.let(resumeFrom) },
-                    )
+                else -> {
+                    // 逐行 item：几百行的歌单也能虚拟化（整块一个 item 会随行数线性变卡）
+                    itemsIndexed(list, key = { _, t -> t.mid }) { i, t ->
+                        val position = when {
+                            list.size == 1 -> BlockSlice.Single
+                            i == 0 -> BlockSlice.Head
+                            i == list.lastIndex -> BlockSlice.Tail
+                            else -> BlockSlice.Middle
+                        }
+                        BlockRowSurface(position = position) {
+                            Column {
+                                if (i > 0) RowDivider()
+                                TrackRow(
+                                    track = t,
+                                    onPlay = {
+                                        if (selecting) return@TrackRow
+                                        playQueue(ctx, list, i)
+                                    },
+                                    onMore = { moreTrack = t },
+                                    liked = likedIds.contains(t.songId),
+                                    onLike = { toggleLike(ctx, t, likedIds.contains(t.songId)) },
+                                    selecting = selecting,
+                                    selected = t.mid in selectedMids,
+                                    downloaded = downloadedMap.containsKey(t.mid),
+                                    onToggleSelect = {
+                                        if (t.mid in selectedMids) selectedMids.remove(t.mid)
+                                        else selectedMids.add(t.mid)
+                                    },
+                                )
+                                if (i == 0) Spacer(Modifier.height(6.dp))
+                                if (i == list.lastIndex) Spacer(Modifier.height(6.dp))
+                            }
+                        }
+                    }
+                    item {
+                        ListFooter(
+                            loadedCount = list.size,
+                            total = total,
+                            loading = loadingMore,
+                            failedAt = failedAt,
+                            exhausted = exhausted,
+                            onRetry = { failedAt?.let(resumeFrom) },
+                        )
+                    }
                 }
             }
         }
@@ -427,6 +492,7 @@ private fun ListFooter(
     total: Int?,
     loading: Boolean,
     failedAt: Int?,
+    exhausted: Boolean = false,
     onRetry: () -> Unit,
 ) {
     val colors = LocalShadeColors.current
@@ -448,10 +514,11 @@ private fun ListFooter(
             ) {
                 Text("加载失败，点击重试", color = colors.accent, fontSize = 12.sp, fontWeight = FontWeight.Medium)
             }
+            failedAt == null && exhausted -> Text("没有更多了", color = colors.textTertiary, fontSize = 12.sp)
             else -> {
                 val t = total
                 Text(
-                    if (t != null && t > 0) "已加载 $loadedCount / 共 $t 首" else "共 $loadedCount 首",
+                    if (t != null && t > 0) "已加载 $loadedCount / 共 $t 首" else "已加载 $loadedCount 首",
                     color = colors.textTertiary, fontSize = 12.sp,
                 )
             }
