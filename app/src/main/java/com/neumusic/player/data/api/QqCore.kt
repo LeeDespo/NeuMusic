@@ -2,6 +2,9 @@ package com.neumusic.player.data.api
 
 import com.neumusic.player.data.Prefs
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -66,10 +69,25 @@ object QqCore {
      * 统一信封 POST。可以把多个 [Req] 放进同一次往返（`req_1`、`req_2`…），
      * 服务端支持单次请求多接口，这是降低请求频次的主要手段。
      */
+    /**
+     * 全局请求节奏闸：相邻两次请求的**发出时刻**至少间隔 [MIN_INTERVAL_MS]。
+     * 只闸"起跑"，不串行"跑步"——出闸后的请求各自并发。
+     * 目的：主页并发拉三栏、音质降级链、电台连续批、自动切歌等场景下，
+     * 瞬时请求尖峰是触发风控的主因（实测），统一在出口处节流。
+     */
+    private val paceMutex = kotlinx.coroutines.sync.Mutex()
+    private var lastCallAt = 0L
+    private const val MIN_INTERVAL_MS = 120L
+
     internal suspend fun call(
         comm: JSONObject,
         vararg reqs: Pair<String, Req>,
     ): JSONObject = withContext(Dispatchers.IO) {
+        paceMutex.withLock {
+            val gap = MIN_INTERVAL_MS - (android.os.SystemClock.elapsedRealtime() - lastCallAt)
+            if (gap > 0) kotlinx.coroutines.delay(gap)
+            lastCallAt = android.os.SystemClock.elapsedRealtime()
+        }
         val body = JSONObject().put("comm", comm)
         reqs.forEach { (name, r) ->
             body.put(name, JSONObject()

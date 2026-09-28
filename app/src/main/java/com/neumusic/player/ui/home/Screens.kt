@@ -163,11 +163,15 @@ fun TrackListScreen(
     var formatTrack by remember { mutableStateOf<Track?>(null) }
 
     suspend fun fetchPage(offset: Int, num: Int): PlaylistApi.Page? {
-        // 每页最多试 3 次；3 次都失败就放弃本轮，由底部重试入口续传。
+        // 每页最多试 3 次，失败后退避重试（0.6s / 1.2s）；3 次都失败就放弃本轮，
+        // 由底部重试入口续传。连续瞬时重试只会加重风控。
         repeat(3) { attempt ->
             runCatching { loadPage(offset, num) }
                 .onSuccess { return it }
-                .onFailure { if (attempt == 2) android.util.Log.w("TrackList", "page@$offset failed", it) }
+                .onFailure {
+                    if (attempt == 2) android.util.Log.w("TrackList", "page@$offset failed", it)
+                    else kotlinx.coroutines.delay(600L * (attempt + 1))
+                }
         }
         return null
     }

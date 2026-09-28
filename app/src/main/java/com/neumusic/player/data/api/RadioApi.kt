@@ -46,6 +46,7 @@ object RadioApi {
         val acc = mutableListOf<Track>()
         var ok = 0
         repeat(batches) { i ->
+            if (i > 0) kotlinx.coroutines.delay(300)   // 批间小歇：连发电台请求容易触发风控
             val root = runCatching { call(commAuth(), "songlist" to Req(
                 "mb_track_radio_svr", "get_radio_track",
                 JSONObject().put("id", radioId).put("firstplay", if (firstplay && i == 0) 1 else 0))) }

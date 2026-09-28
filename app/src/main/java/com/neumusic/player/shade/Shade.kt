@@ -288,14 +288,25 @@ fun Modifier.blockSlice(
                 // 暗影 offset 向下 → 它的底边就是块尾的真实投影，纵向向下外延；
                 // 亮影 offset 向上 → 它的顶边是块首的真实受光，纵向向上外延。
                 // 反向外延会让对侧漏出一大坨模糊（实测"一大坨光影糊在顶部/底部"）。
+                // 切片的可见端带与列表同款的圆角（块首顶角/块尾底角），投影才不显得生硬
+                val r = CornerRadius(corner, corner)
                 val darkSlice = Path().apply {
                     addRoundRect(
-                        RoundRect(0f, if (isHead) 0f else -ext, w, if (isTail) h else h + ext),
+                        when {
+                            isHead && isTail -> RoundRect(0f, 0f, w, h, topLeftCornerRadius = r, topRightCornerRadius = r, bottomRightCornerRadius = r, bottomLeftCornerRadius = r)
+                            isHead -> RoundRect(0f, 0f, w, h + ext, topLeftCornerRadius = r, topRightCornerRadius = r)
+                            isTail -> RoundRect(0f, -ext, w, h, bottomLeftCornerRadius = r, bottomRightCornerRadius = r)
+                            else -> RoundRect(0f, -ext, w, h + ext)
+                        }
                     )
                 }
                 val lightSlice = Path().apply {
                     addRoundRect(
-                        RoundRect(0f, if (isHead) 0f else -ext, w, h),
+                        when {
+                            isHead && isTail -> RoundRect(0f, 0f, w, h, topLeftCornerRadius = r, topRightCornerRadius = r, bottomRightCornerRadius = r, bottomLeftCornerRadius = r)
+                            isHead -> RoundRect(0f, 0f, w, h, topLeftCornerRadius = r, topRightCornerRadius = r)
+                            else -> RoundRect(0f, -ext, w, h, bottomLeftCornerRadius = r, bottomRightCornerRadius = r)
+                        }
                     )
                 }
                 drawIntoCanvas { canvas ->
