@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -51,6 +52,8 @@ import com.neumusic.player.shade.flatPressable
 import com.neumusic.player.shade.shadePressable
 import com.neumusic.player.ui.common.AlbumArt
 import com.neumusic.player.ui.common.RowDivider
+import com.neumusic.player.ui.common.BlockRowSurface
+import com.neumusic.player.ui.common.BlockRowPosition
 import com.neumusic.player.ui.common.TrackListBlock
 import com.neumusic.player.ui.common.VerticalEdgeFades
 import com.neumusic.player.ui.common.TrackRow
@@ -272,9 +275,16 @@ fun TrackListScreen(
                         }
                     }
                 }
-                item {
-                    TrackListBlock {
-                        list.forEachIndexed { i, t ->
+                // 逐行 item：几百行的歌单也能虚拟化（整块一个 item 会随行数线性变卡）
+                itemsIndexed(list, key = { _, t -> t.mid }) { i, t ->
+                    val position = when {
+                        list.size == 1 -> BlockRowPosition.Single
+                        i == 0 -> BlockRowPosition.Head
+                        i == list.lastIndex -> BlockRowPosition.Tail
+                        else -> BlockRowPosition.Middle
+                    }
+                    BlockRowSurface(position = position) {
+                        Column {
                             if (i > 0) RowDivider()
                             TrackRow(
                                 track = t,
@@ -293,6 +303,8 @@ fun TrackListScreen(
                                     else selectedMids.add(t.mid)
                                 },
                             )
+                            if (i == 0) Spacer(Modifier.height(6.dp))
+                            if (i == list.lastIndex) Spacer(Modifier.height(6.dp))
                         }
                     }
                 }
@@ -307,6 +319,8 @@ fun TrackListScreen(
                 }
             }
         }
+        // 列表上下边缘的渐隐（与主页一致）
+        VerticalEdgeFades(state = listState, height = 30.dp)
 
         // 选择模式：固定覆盖条（全选/反选/取消/下载所选）；普通态无覆盖顶栏
         if (selecting) {

@@ -11,6 +11,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import com.neumusic.player.shade.LocalReliefScale
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -102,6 +110,79 @@ fun RowDivider(widthFraction: Float = 0.52f) {
                 .height(1.dp)
                 .background(colors.textTertiary.copy(alpha = 0.42f), RoundedCornerShape(0.5.dp)),
         )
+    }
+}
+
+/** 行在整块凸面里的位置：决定圆角与阴影条画在哪。 */
+enum class BlockRowPosition { Head, Middle, Tail, Single }
+
+/**
+ * 虚拟化友好的「整块凸面」行容器。
+ *
+ * 曲目列表可能几百行：把整块画在一个 LazyColumn item 里，组合/排版/光栅全都随行数
+ * 线性膨胀，进出二级页随歌单越大越卡（实测）。改为**每行一个列表项、各画一小片**：
+ * 行与行同色 butt-join 成一整块，圆角只出现在块首/块尾，阴影拆成
+ * 「左亮/右暗」竖向渐变条与块尾暗带——渐变代替整块 BlurMaskFilter，
+ * 成本只与可见行数相关。
+ */
+@Composable
+fun BlockRowSurface(
+    position: BlockRowPosition,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    val colors = LocalShadeColors.current
+    val relief = LocalReliefScale.current
+    val strip = (9f * relief).dp
+    val rounded = when (position) {
+        BlockRowPosition.Head -> RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)
+        BlockRowPosition.Tail -> RoundedCornerShape(bottomStart = 22.dp, bottomEnd = 22.dp)
+        BlockRowPosition.Single -> RoundedCornerShape(22.dp)
+        BlockRowPosition.Middle -> RectangleShape
+    }
+    Column(modifier.fillMaxWidth()) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .clip(rounded)
+                .background(colors.background)
+                .drawBehind {
+                    val w = strip.toPx()
+                    // 左缘受光（亮），右缘背光（暗）——与 drawShade 的双影方向一致
+                    drawRect(
+                        brush = Brush.horizontalGradient(
+                            0f to colors.shadowLight.copy(alpha = 0.9f),
+                            1f to colors.shadowLight.copy(alpha = 0f),
+                        ),
+                        size = Size(w, size.height),
+                    )
+                    drawRect(
+                        brush = Brush.horizontalGradient(
+                            0f to colors.shadowDark.copy(alpha = 0f),
+                            1f to colors.shadowDark.copy(alpha = 0.85f),
+                        ),
+                        topLeft = Offset(size.width - w, 0f),
+                        size = Size(w, size.height),
+                    )
+                },
+        ) { content() }
+        if (position == BlockRowPosition.Tail || position == BlockRowPosition.Single) {
+            // 块尾下方的投影带（down-offset 阴影露出块外的部分）
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(strip)
+                    .padding(start = 6.dp, end = 6.dp)
+                    .drawBehind {
+                        drawRect(
+                            brush = Brush.verticalGradient(
+                                0f to colors.shadowDark.copy(alpha = 0.5f),
+                                1f to colors.shadowDark.copy(alpha = 0f),
+                            ),
+                        )
+                    },
+            )
+        }
     }
 }
 
