@@ -10,7 +10,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -35,12 +38,11 @@ import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.neumusic.player.data.LyricTextSize
@@ -66,6 +68,11 @@ private const val RETURN_DELAY_MS = 3000L
  * - **双击任意歌词行** → 播放进度跳到该句；
  * - **拖动/双击后 3 秒无操作** → 自动回归正在播放的行；
  * - 逐字扫色（QRC）按当前播放位置算，所以浏览时看到的历史行是整句已唱、未来的行是未唱。
+ *
+ * 附加行（各自由右上角开关控制，数据来自 [com.neumusic.player.data.api.LyricApi]）：
+ * - **注音**（`kana`）：汉字上方的假名读音（逐字行）或整行读音（行级）；
+ * - **音译**（`roman`）：主行下方的罗马音行；
+ * - **翻译**（`translation`）：主行下方的译文行。
  */
 @Composable
 fun LyricsView(
@@ -73,8 +80,14 @@ fun LyricsView(
     positionMs: Long,
     textSize: LyricTextSize,
     showTranslation: Boolean,
+    showRoman: Boolean,
+    showKana: Boolean,
     canToggleTranslation: Boolean,
+    canToggleRoman: Boolean,
+    canToggleKana: Boolean,
     onToggleTranslation: () -> Unit,
+    onToggleRoman: () -> Unit,
+    onToggleKana: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalShadeColors.current
@@ -202,29 +215,52 @@ fun LyricsView(
                             )
                         },
                 ) {
-                    val lineFontSize = if (focused) (textSize.baseSp + 2).sp else textSize.baseSp.sp
+                    val mainSize = if (focused) (textSize.baseSp + 2).sp else textSize.baseSp.sp
+                    // 注音（行级，无逐字数据的行）：主行上方的整行假名读音
+                    if (showKana && line.kana.isNotEmpty()) {
+                        Text(
+                            text = line.kana,
+                            color = colors.textTertiary,
+                            fontSize = (textSize.baseSp - 4).sp,
+                            lineHeight = (textSize.baseSp - 1).sp,
+                            textAlign = TextAlign.Start,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                     if (line.hasWords && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        // QRC 逐字行：AMLL 式扫色。任何有逐字数据的行都按当前位置画填充，
-                        // 因此浏览时历史行是整句已唱、未到的行是未唱。
-                        KaraokeLine(
-                            text = line.text,
+                        // QRC 逐字行：AMLL 式扫色 + 字上注音。任何有逐字数据的行都按
+                        // 当前位置画填充，因此浏览时历史行是整句已唱、未到的行是未唱。
+                        KaraokeWords(
                             words = line.words,
                             positionMs = finePosition,
-                            fontSize = lineFontSize,
+                            fontSize = mainSize,
                             lineHeight = (textSize.baseSp + 9).sp,
+                            kanaSize = (textSize.baseSp - 4).sp,
+                            showKana = showKana,
                             bold = focused,
                             baseColor = colors.textPrimary,
                             fillColor = colors.accent,
+                            kanaColor = colors.textTertiary,
                         )
                     } else {
                         Text(
                             text = line.text,
                             color = if (focused) colors.accent else colors.textPrimary,
-                            fontSize = lineFontSize,
+                            fontSize = mainSize,
                             fontWeight = if (focused) FontWeight.Bold else FontWeight.Normal,
                             textAlign = TextAlign.Start,
                             lineHeight = (textSize.baseSp + 9).sp,
                             modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    if (showRoman && line.roman.isNotEmpty()) {
+                        Text(
+                            text = line.roman,
+                            color = colors.textTertiary,
+                            fontSize = (textSize.baseSp - 4).sp,
+                            lineHeight = (textSize.baseSp - 1).sp,
+                            textAlign = TextAlign.Start,
+                            modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
                         )
                     }
                     if (showTranslation && line.translation.isNotEmpty()) {
@@ -244,130 +280,145 @@ fun LyricsView(
         // 边缘渐隐（与主页同一处理）
         VerticalEdgeFades(state = listState, height = 30.dp)
 
-        // 翻译开关：右上角与顶栏均衡器同横坐标；只变图标颜色、不变凸凹
-        if (canToggleTranslation) {
-            val iconTint by animateColorAsState(
-                if (showTranslation) colors.accent else colors.textTertiary,
-                tween(200), label = "transTint",
-            )
-            Text(
-                "译",
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Bold,
-                color = iconTint,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(end = 24.dp, top = 10.dp)
-                    .pointerInput(Unit) { detectTapGestures(onTap = { onToggleTranslation() }) },
-            )
-        }
+        // ── 译 / 音 / 注 三个开关：同一行，右上角 ──
+        AnnotationToggles(
+            showTranslation = showTranslation,
+            showRoman = showRoman,
+            showKana = showKana,
+            canToggleTranslation = canToggleTranslation,
+            canToggleRoman = canToggleRoman,
+            canToggleKana = canToggleKana,
+            onToggleTranslation = onToggleTranslation,
+            onToggleRoman = onToggleRoman,
+            onToggleKana = onToggleKana,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(end = 24.dp, top = 6.dp),
+        )
     }
 }
 
-/**
- * 已唱到的字符下标：播放位置的**纯函数**。
- *
- * 早前用 `LaunchedEffect(positionMs, words)` + `mutableStateOf` 写这个值，而
- * `positionMs` 每 33ms 变一次 —— 每帧都在「取消旧协程、启动新协程」。协程是
- * dispatch 调度的，被取消的 job 可能一次都没跑过，填充下标就永远停在 0。
- * 改成组合期直接算：没有协程、没有延迟、没有跳帧。
- */
-private fun fillCharIndex(positionMs: Long, words: List<LyricWord>, textLen: Int): Int {
-    if (words.isEmpty()) return 0
-    if (positionMs <= words.first().startMs) return 0
-    if (positionMs >= words.last().endMs) return textLen
-    var acc = 0
-    for (w in words) {
-        if (positionMs < w.endMs) {
-            val span = (w.endMs - w.startMs).coerceAtLeast(1L)
-            val frac = ((positionMs - w.startMs).toFloat() / span).coerceIn(0f, 1f)
-            return acc + (w.text.length * frac).toInt()
-        }
-        acc += w.text.length
-    }
-    return textLen
-}
-
-/** 填充区域：未唱 / 整句已唱 / 唱到某行的某个 x。 */
-private sealed interface Fill {
-    data object None : Fill
-    data object All : Fill
-    data class Part(val top: Float, val bottom: Float, val right: Float) : Fill
-}
-
-/**
- * QRC 逐字行（AMLL 式扫色的原生简化实现）：
- * 同一文本画两层——底层为未唱色，顶层为 accent 填充色，按「唱到的位置」用 `clipRect` 裁剪。
- * 字边界取自 QRC 时间，字内按时间线性插值。
- *
- * 裁剪要**跟着换行走**：`getHorizontalPosition` 返回的是「所在行内」的 x，
- * 长句折行后只按 x 裁会把前面几行整行切掉。所以整行以上的部分整行画，
- * 只有当前行按 x 裁。
- */
+/** 译（翻译）/ 音（音译）/ 注（注音）开关行：开=accent，关=textTertiary；只变色、不变凸凹。 */
 @Composable
-private fun KaraokeLine(
-    text: String,
+private fun AnnotationToggles(
+    showTranslation: Boolean,
+    showRoman: Boolean,
+    showKana: Boolean,
+    canToggleTranslation: Boolean,
+    canToggleRoman: Boolean,
+    canToggleKana: Boolean,
+    onToggleTranslation: () -> Unit,
+    onToggleRoman: () -> Unit,
+    onToggleKana: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalShadeColors.current
+    if (!canToggleTranslation && !canToggleRoman && !canToggleKana) return
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+        ToggleLabel("译", showTranslation && canToggleTranslation, canToggleTranslation, onToggleTranslation)
+        ToggleLabel("音", showRoman && canToggleRoman, canToggleRoman, onToggleRoman)
+        ToggleLabel("注", showKana && canToggleKana, canToggleKana, onToggleKana)
+    }
+}
+
+@Composable
+private fun ToggleLabel(label: String, on: Boolean, enabled: Boolean, onTap: () -> Unit) {
+    val colors = LocalShadeColors.current
+    val tint by animateColorAsState(
+        when {
+            !enabled -> colors.textTertiary.copy(alpha = 0.35f)
+            on -> colors.accent
+            else -> colors.textTertiary
+        },
+        tween(200), label = "toggle_$label",
+    )
+    Text(
+        label,
+        fontSize = 14.sp,
+        fontWeight = FontWeight.Bold,
+        color = tint,
+        modifier = Modifier
+            .padding(horizontal = 4.dp, vertical = 8.dp)
+            .pointerInput(label, enabled) {
+                if (enabled) detectTapGestures(onTap = { onTap() })
+            },
+    )
+}
+
+/** 某个字在播放位置下已唱的比例（0..1）；整字唱完返回 1。 */
+private fun wordFraction(w: LyricWord, positionMs: Long): Float = when {
+    positionMs >= w.endMs -> 1f
+    positionMs <= w.startMs -> 0f
+    else -> ((positionMs - w.startMs).toFloat() / (w.endMs - w.startMs).coerceAtLeast(1L))
+        .coerceIn(0f, 1f)
+}
+
+/**
+ * QRC 逐字行（AMLL 式扫色的原生实现）：
+ * 每个字一个单元——注音（可选）在上，字文本双层（底层未唱色 + 顶层 accent 填充），
+ * 按「该字已唱比例」横向裁剪填充层。字内按时间线性插值，逐字自然衔接成扫色。
+ *
+ * 用 FlowRow 让字单元自然换行；相比「整行两层文本 + getHorizontalPosition 裁剪」，
+ * 这里不需要按文本行换算 x，长句折行天然正确（早前折行后只按 x 裁会切掉前面整行）。
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun KaraokeWords(
     words: List<LyricWord>,
     positionMs: Long,
-    fontSize: TextUnit,
-    lineHeight: TextUnit,
+    fontSize: androidx.compose.ui.unit.TextUnit,
+    lineHeight: androidx.compose.ui.unit.TextUnit,
+    kanaSize: androidx.compose.ui.unit.TextUnit,
+    showKana: Boolean,
     bold: Boolean,
     baseColor: Color,
     fillColor: Color,
+    kanaColor: Color,
 ) {
-    var layoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
-    val charIndex = remember(positionMs, words, text) { fillCharIndex(positionMs, words, text.length) }
-    val layout = layoutResult
-    val fill: Fill = remember(charIndex, layout, text) {
-        when {
-            layout == null || charIndex <= 0 -> Fill.None
-            charIndex >= text.length -> Fill.All
-            else -> {
-                val line = layout.getLineForOffset(charIndex)
-                Fill.Part(
-                    top = layout.getLineTop(line),
-                    bottom = layout.getLineBottom(line),
-                    right = layout.getHorizontalPosition(charIndex, usePrimaryDirection = true),
-                )
+    val weight = if (bold) FontWeight.Bold else FontWeight.Normal
+    FlowRow {
+        words.forEach { w ->
+            val frac = wordFraction(w, positionMs)
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                if (showKana && w.kana.isNotEmpty() && w.kana != w.text) {
+                    Text(
+                        text = w.kana,
+                        color = kanaColor,
+                        fontSize = kanaSize,
+                        lineHeight = kanaSize,
+                        maxLines = 1,
+                    )
+                }
+                Box {
+                    Text(
+                        text = w.text,
+                        color = baseColor,
+                        fontSize = fontSize,
+                        fontWeight = weight,
+                        lineHeight = lineHeight,
+                    )
+                    if (frac > 0f) {
+                        var widthPx by remember(w.text) { mutableStateOf(0f) }
+                        Text(
+                            text = w.text,
+                            color = fillColor,
+                            fontSize = fontSize,
+                            fontWeight = weight,
+                            lineHeight = lineHeight,
+                            modifier = Modifier
+                                .onSizeChanged { widthPx = it.width.toFloat() }
+                                .drawWithContent {
+                                    when {
+                                        // 整字唱完直接画；尺寸未量出一帧都不画，避免闪成整字填充
+                                        frac >= 1f -> drawContent()
+                                        widthPx <= 0f -> Unit
+                                        else -> clipRect(right = widthPx * frac) { this@drawWithContent.drawContent() }
+                                    }
+                                },
+                        )
+                    }
+                }
             }
         }
-    }
-
-    val weight = if (bold) FontWeight.Bold else FontWeight.Normal
-    Box {
-        Text(
-            text = text,
-            color = baseColor,
-            fontSize = fontSize,
-            fontWeight = weight,
-            textAlign = TextAlign.Start,
-            lineHeight = lineHeight,
-            onTextLayout = { layoutResult = it },
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Text(
-            text = text,
-            color = fillColor,
-            fontSize = fontSize,
-            fontWeight = weight,
-            textAlign = TextAlign.Start,
-            lineHeight = lineHeight,
-            modifier = Modifier
-                .fillMaxWidth()
-                .drawWithContent {
-                    when (val f = fill) {
-                        Fill.None -> Unit
-                        Fill.All -> drawContent()
-                        is Fill.Part -> {
-                            if (f.top > 0f) {
-                                clipRect(top = 0f, bottom = f.top) { this@drawWithContent.drawContent() }
-                            }
-                            clipRect(top = f.top, bottom = f.bottom, right = f.right) {
-                                this@drawWithContent.drawContent()
-                            }
-                        }
-                    }
-                },
-        )
     }
 }

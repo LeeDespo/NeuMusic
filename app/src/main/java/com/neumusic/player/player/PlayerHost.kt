@@ -57,6 +57,14 @@ object PlayerHost {
     /** 取链回调由 UI 层注入（需要 suspend 访问网络层）。 */
     var resolveUrl: (suspend (Track) -> String?)? = null
 
+    /** 全局错误回调（AppRoot 注入 toast）。自动切换失败也必须可见，不能静默。 */
+    var onError: ((String) -> Unit)? = null
+
+    private val defaultOnError: (String) -> Unit = { msg -> onError?.invoke(msg) }
+
+    /** 「下一首播放」待播队列：自动切歌与手动下一首都优先消费它（随机模式下也保证先播）。 */
+    private val pendingNext = ArrayDeque<Track>()
+
     private val listener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             _isPlaying.value = isPlaying
@@ -125,6 +133,7 @@ object PlayerHost {
         queue = tracks
         index = startAt.coerceIn(0, tracks.size - 1)
         playedHistory.clear()
+        pendingNext.clear()
         playCurrent(onError)
     }
 
@@ -169,11 +178,14 @@ object PlayerHost {
     fun toggle() {
         main.post {
             val p = player ?: return@post
-            // 关键修复：取链接失败（如限流）后播放器处于 IDLE，此时点"播放"
-            // 不能只是 play()（对空播放器无效，表现为"按钮点不动"），
-            // 而要为当前曲目重新解析链接再播。
-            if (p.playbackState == Player.STATE_IDLE && _current.value != null) {
-                playCurrent {}
+            // 关键修复：取链接失败（如限流）后播放器处于 IDLE；自动切换失败后处于
+            // ENDED（advance 失败不会再有下一首）。这两种状态点"播放"都不能只是
+            // play()——对 IDLE 无效（"按钮点不动"），对 ENDED 会把刚放完的这首歌
+            // 从头再放一遍（"自动切换变成重播"的观感）——都要为当前曲目重新解析。
+            if ((p.playbackState == Player.STATE_IDLE || p.playbackState == Player.STATE_ENDED)
+                && _current.value != null
+            ) {
+                playCurrent(defaultOnError)
                 return@post
             }
             if (p.isPlaying) p.pause() else p.play()
@@ -183,37 +195,49 @@ object PlayerHost {
     fun next() {
         if (queue.isEmpty()) return
         recordHistory()
+        if (playPendingNext()) return
         index = pickNext()
-        playCurrent {}
+        playCurrent(defaultOnError)
     }
 
     /**
-     * 「下一首播放」：把 [track] 插到当前曲目之后。
-     * 队列为空时等价于直接播放这一首（单曲队列）。
-     * 已在队列中的同曲目会先移除再插入（避免重复）；插入点始终是"当前曲目之后"。
+     * 「下一首播放」：把 [track] 排到当前曲目之后，**保证**下一次切歌（自动或手动）
+     * 先播它 —— 随机模式下也一样，所以用待播队列而不是只动队列下标。
+     * 早期版本直接 `index = cur + 1` 却不播，结果 ENDED 时 advance 又从那个下标
+     * 往前跳了一格，"下一首播放"被整个跳过。
      */
     fun playNext(track: Track) {
         if (queue.isEmpty()) {
             playQueue(listOf(track), 0)
             return
         }
-        val currentMid = queue.getOrNull(index)?.mid
-        val dedup = queue.filterNot { it.mid == track.mid }
-        // 去重后当前曲目下标可能前移：被移除的是当前曲时保持它在原位前，
-        // 否则看被移除项是否在当前曲之前。
-        var cur = index
-        if (currentMid == track.mid) {
-            cur = index.coerceAtMost(dedup.lastIndex)
-        } else if (queue.take(index).any { it.mid == track.mid }) {
-            cur -= 1
+        queue = queue.filterNot { it.mid == track.mid }
+        pendingNext.removeAll { it.mid == track.mid }
+        val cur = index.coerceIn(0, queue.lastIndex)
+        queue = queue.take(cur + 1) + track + queue.drop(cur + 1)
+        pendingNext.addLast(track)
+    }
+
+    /** 下一首（自动/手动共用）：有待播队列就先播它。返回是否消费了待播曲目。 */
+    private fun playPendingNext(): Boolean {
+        val pending = pendingNext.removeFirstOrNull() ?: return false
+        val i = queue.indexOfFirst { it.mid == pending.mid }
+        if (i >= 0) {
+            index = i
+        } else {
+            // 待播曲目不在队列里（队列被换过）：插到当前曲目之后补进来。
+            val cur = index.coerceIn(0, queue.lastIndex)
+            queue = queue.take(cur + 1) + pending + queue.drop(cur + 1)
+            index = cur + 1
         }
-        queue = dedup.take(cur + 1) + track + dedup.drop(cur + 1)
-        index = cur + 1
+        playCurrent(defaultOnError)
+        return true
     }
 
     /**
-     * 上一首：随机模式按**播放历史**回跳（回到真正上一首播过的歌），
-     * 顺序模式按下标回退（循环）。
+     * 上一首：随机模式按**播放历史**回跳（回到真正上一首播过的歌）；
+     * 历史为空（刚开播就按上一首）按顺序回退 —— 早前回退到「随机选一首」，
+     * 用户报的"随机上一首不是播过的上一首"就是这个。顺序/单曲循环按下标回退（循环）。
      */
     fun previous() {
         if (queue.isEmpty()) return
@@ -221,18 +245,12 @@ object PlayerHost {
             val prev = playedHistory.removeLastOrNull()
             if (prev != null && prev != index) {
                 index = prev
-                playCurrent {}
+                playCurrent(defaultOnError)
                 return
             }
-            val others = queue.indices.filter { it != index }
-            if (others.isNotEmpty()) {
-                index = others.random()
-                playCurrent {}
-            }
-            return
         }
         index = if (index - 1 < 0) queue.lastIndex else index - 1
-        playCurrent {}
+        playCurrent(defaultOnError)
     }
 
     /** 当前曲目入历史栈（供随机"上一首"回跳），避免栈顶连续重复。 */
@@ -253,15 +271,16 @@ object PlayerHost {
         if (i < 0 || i >= queue.size) return
         recordHistory()
         index = i
-        playCurrent {}
+        playCurrent(defaultOnError)
     }
 
     /** 播放结束自动前进。单曲循环由 REPEAT_MODE_ONE 处理，不会走到这里。 */
     private fun advance() {
         if (queue.isEmpty()) return
         recordHistory()
+        if (playPendingNext()) return
         index = pickNext()
-        playCurrent {}
+        playCurrent(defaultOnError)
     }
 
     private fun pickNext(): Int = when (Prefs.playMode) {

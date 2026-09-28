@@ -119,6 +119,8 @@ fun PlayerScreen(onBack: () -> Unit, onOpenEqualizer: () -> Unit = {}) {
     val transPref by Prefs.lyricTransFlow.collectAsState()
     // 本地副本，便于页面上的按钮即时切换（同时写回设置）。
     var showTrans by remember(transPref) { mutableStateOf(transPref) }
+    var showRoman by remember { mutableStateOf(Prefs.showLyricRoman) }
+    var showKana by remember { mutableStateOf(Prefs.showLyricKana) }
 
     var mode by remember { mutableStateOf(Prefs.playMode) }
     var pos by remember { mutableLongStateOf(0L) }
@@ -193,12 +195,26 @@ fun PlayerScreen(onBack: () -> Unit, onOpenEqualizer: () -> Unit = {}) {
                     positionMs = pos,
                     textSize = lyricSize,
                     showTranslation = showTrans && (lyrics?.hasTranslation == true),
-                    // 只有当前曲目真有翻译时才给按钮；顺带把设置里的默认值也告诉它
+                    showRoman = showRoman && (lyrics?.hasRoman == true),
+                    showKana = showKana && (lyrics?.hasKana == true),
+                    // 只有当前曲目真有对应数据时才给按钮
                     canToggleTranslation = lyrics?.hasTranslation == true,
+                    canToggleRoman = lyrics?.hasRoman == true,
+                    canToggleKana = lyrics?.hasKana == true,
                     onToggleTranslation = {
                         val next = !showTrans
                         Prefs.showLyricTranslation = next
                         showTrans = next
+                    },
+                    onToggleRoman = {
+                        val next = !showRoman
+                        Prefs.showLyricRoman = next
+                        showRoman = next
+                    },
+                    onToggleKana = {
+                        val next = !showKana
+                        Prefs.showLyricKana = next
+                        showKana = next
                     },
                 )
             }

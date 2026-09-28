@@ -15,34 +15,39 @@ import kotlinx.coroutines.flow.StateFlow
  * 23=民谣(宋冬野 3/3) 27=爵士 28=金属(Metallica) 33=电子(Daft Punk)
  * 34=说唱(Eminem 3/3) 50=摇滚(Creep/New Divide)
  * 未校准：3/15/19/31/37/39 等，保持当前预设。
+ *
+ * 「曲风 → 预设」映射存 `Prefs.eqGenreMap`（默认值见 [defaultGenreMapJson]），
+ * 音效页里用户可以为每个曲风挑任意预设（含自建预设），改完即生效。
  */
 object SmartEq {
 
-    /** 风格码 → 设备预设名（与 Android 内置 Equalizer 预设对齐）。 */
-    private val GENRE_TO_PRESET = mapOf(
-        1 to "Pop",
-        2 to "Classical",
-        20 to "Dance",
-        22 to "Rock",
-        23 to "Folk",
-        27 to "Jazz",
-        28 to "Heavy Metal",
-        33 to "Dance",
-        34 to "Hip Hop",
-        50 to "Rock",
+    /** 已校准的风格码与中文名（界面展示用；顺序即音效页里的展示顺序）。 */
+    val GENRES: List<Pair<Int, String>> = listOf(
+        1 to "流行", 2 to "古典", 22 to "摇滚", 50 to "摇滚",
+        23 to "民谣", 27 to "爵士", 28 to "金属", 34 to "说唱",
+        20 to "电子", 33 to "电子",
     )
+
+    private val DEFAULT_MAP = mapOf(
+        1 to "Pop", 2 to "Classical", 20 to "Dance", 22 to "Rock",
+        23 to "Folk", 27 to "Jazz", 28 to "Heavy Metal", 33 to "Dance",
+        34 to "Hip Hop", 50 to "Rock",
+    )
+
+    /** 默认映射 JSON（首次播种用）。 */
+    fun defaultGenreMapJson(): String {
+        val o = org.json.JSONObject()
+        DEFAULT_MAP.forEach { (k, v) -> o.put(k.toString(), v) }
+        return o.toString()
+    }
 
     private val _lastApplied = MutableStateFlow<String?>(null)
 
     /** 音效页展示的最近一次智能动作说明。 */
     val lastApplied: StateFlow<String?> = _lastApplied
 
-    /** 该风格码对应的预设下标；无映射返回 null。 */
-    fun presetIndexFor(genre: Int): Int? {
-        val name = GENRE_TO_PRESET[genre] ?: return null
-        return EqualizerHost.presetNames.indexOfFirst { it.equals(name, ignoreCase = true) }
-            .takeIf { it >= 0 }
-    }
+    /** 该风格码当前映射的预设名；无映射返回 null。 */
+    fun presetNameFor(genre: Int): String? = EqualizerHost.genreMap()[genre]
 
     /** 换歌时调用：应用映射预设并更新提示。 */
     fun applyFor(track: Track) {
@@ -51,14 +56,14 @@ object SmartEq {
             _lastApplied.value = "本曲无风格数据，保持当前调音"
             return
         }
-        val idx = presetIndexFor(track.genre)
-        if (idx == null) {
+        val name = presetNameFor(track.genre)
+        if (name == null) {
             _lastApplied.value = "风格 ${track.genre} 暂无映射，保持当前调音"
             return
         }
-        if (idx != EqualizerHost.preset.value) {
-            EqualizerHost.setPreset(idx)
+        if (name != EqualizerHost.selectedPreset.value) {
+            EqualizerHost.selectPreset(name)
         }
-        _lastApplied.value = "智能调音：${track.name.take(12)} → ${EqualizerHost.presetNames.getOrNull(idx) ?: "?"}"
+        _lastApplied.value = "智能调音：${track.name.take(12)} → $name"
     }
 }

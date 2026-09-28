@@ -1,24 +1,32 @@
 package com.neumusic.player.data
 
-/** 逐字时间（QRC）。[startMs]/[endMs] 为该字的绝对起止。 */
+/** 逐字时间（QRC）。[startMs]/[endMs] 为该字的绝对起止；[kana] 是这个字的注音（假名读音，可空）。 */
 data class LyricWord(
     val text: String,
     val startMs: Long,
     val endMs: Long,
+    val kana: String = "",
 )
 
 /**
  * 一行歌词。[timeMs] 为该行起始时间。
  * [translation] 是可选的翻译（QQ 仅在部分曲目提供，多数为空）。
  * [words] 非空时为 **QRC 逐字行**（每字带时间），渲染为卡拉 OK 扫色。
+ * [roman] 是该行的音译（罗马音，来自 `roma:1`，逐字数据合成为行文本）。
+ * [kana] 是该行的注音（假名读音行，来自翻译里的 `[kana:…]` 元数据）。
  */
 data class LyricLine(
     val timeMs: Long,
     val text: String,
     val translation: String = "",
     val words: List<LyricWord> = emptyList(),
+    val roman: String = "",
+    val kana: String = "",
 ) {
     val hasWords: Boolean get() = words.isNotEmpty()
+
+    /** 该行结束时间：逐字行取末字结束；行级 LRC 无从得知，返回 -1。 */
+    val endMs: Long get() = if (words.isNotEmpty()) words.maxOf { it.endMs } else -1L
 }
 
 /** 一首歌的完整歌词（按时间升序）。 */
@@ -27,6 +35,10 @@ data class Lyrics(val lines: List<LyricLine>) {
     val hasWordTiming: Boolean get() = lines.any { it.hasWords }
     /** 是否真的带回了翻译（多数曲目没有，UI 据此决定要不要显示翻译开关）。 */
     val hasTranslation: Boolean get() = lines.any { it.translation.isNotEmpty() }
+    /** 是否带回了音译（罗马音）。 */
+    val hasRoman: Boolean get() = lines.any { it.roman.isNotEmpty() }
+    /** 是否带回了注音（假名读音）。 */
+    val hasKana: Boolean get() = lines.any { it.kana.isNotEmpty() || it.words.any { w -> w.kana.isNotEmpty() } }
 
     /**
      * 当前播放位置对应的行下标；未到第一行时返回 0，超出末尾返回最后一行。

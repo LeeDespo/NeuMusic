@@ -144,6 +144,16 @@ object Prefs {
             lyricTransFlow.value = v
         }
 
+    /** 是否显示歌词音译（罗马音行；仅曲带 roma 数据时才有内容）。 */
+    var showLyricRoman: Boolean
+        get() = sp.getBoolean("showLyricRoman", false)
+        set(v) = sp.edit().putBoolean("showLyricRoman", v).apply()
+
+    /** 是否显示歌词注音（假名读音；仅曲带 kana 元数据时才有内容）。 */
+    var showLyricKana: Boolean
+        get() = sp.getBoolean("showLyricKana", false)
+        set(v) = sp.edit().putBoolean("showLyricKana", v).apply()
+
     /** 下载保存目录（MediaStore RELATIVE_PATH，限公共音乐/下载目录）。 */
     var downloadDir: DownloadDir
         get() = DownloadDir.entries.firstOrNull { it.name == sp.getString("downloadDir", null) }
@@ -175,10 +185,29 @@ object Prefs {
         get() = sp.getBoolean("eqEnabled", false)
         set(v) = sp.edit().putBoolean("eqEnabled", v).apply()
 
-    /** 预设下标；-1 = 自定义。 */
-    var eqPreset: Int
-        get() = sp.getInt("eqPreset", -1)
-        set(v) = sp.edit().putInt("eqPreset", v).apply()
+    /**
+     * 预设存储（JSON）：`{"presets":[{"name":"Pop","gains":[毫贝×5],"builtin":true}],…}`。
+     * 内置预设首次挂载时整表快照进来，此后**所有预设都可改**（拖滑杆即写回当前预设），
+     * 用户也可以新增/删除自己的预设。由 EqualizerHost 读写，UI 不直接碰。
+     */
+    var eqStore: String
+        get() = sp.getString("eqStore", "") ?: ""
+        set(v) = sp.edit().putString("eqStore", v).apply()
+
+    /** 内置预设是否已完成快照（只做一次）。 */
+    var eqSeeded: Boolean
+        get() = sp.getBoolean("eqSeeded", false)
+        set(v) = sp.edit().putBoolean("eqSeeded", v).apply()
+
+    /** 当前选中的预设名；null = 手动（不挂预设）。 */
+    var eqSelected: String?
+        get() = sp.getString("eqSelected", null)
+        set(v) = sp.edit().putString("eqSelected", v).apply()
+
+    /** 曲风码 → 预设名（智能调音的映射，UI 可改）。JSON：`{"1":"Pop","22":"Rock"}`。 */
+    var eqGenreMap: String
+        get() = sp.getString("eqGenreMap", "") ?: ""
+        set(v) = sp.edit().putString("eqGenreMap", v).apply()
 
     /** 各频段电平（毫贝），逗号分隔。 */
     var eqBands: IntArray

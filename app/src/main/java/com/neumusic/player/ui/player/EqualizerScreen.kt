@@ -16,10 +16,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -33,7 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -44,16 +46,24 @@ import androidx.compose.ui.unit.sp
 import com.neumusic.player.data.Prefs
 import com.neumusic.player.player.DynamicsFxHost
 import com.neumusic.player.player.EqualizerHost
+import com.neumusic.player.player.EqualizerHost.EqPreset
 import com.neumusic.player.player.PlayerHost
 import com.neumusic.player.player.SmartEq
 import com.neumusic.player.shade.LocalShadeColors
 import com.neumusic.player.shade.shadeInset
 import com.neumusic.player.shade.shadeSurface
+import com.neumusic.player.ui.common.ShadeDialog
+import com.neumusic.player.ui.common.ShadeDialogRow
 import com.neumusic.player.ui.common.toastMain
 import com.neumusic.player.ui.common.HorizontalShadeSlider
 import com.neumusic.player.ui.home.DetailTopBar
 
-/** 均衡器页（播放页顶栏"均衡器"进入）。 */
+/**
+ * 音效页（播放页顶栏「均衡器」进入）。
+ *
+ * 结构：开关 → 预设（全部可改 + 新增/删除）→ 频段滑杆 → 低音增强 → DVC/声道平衡 →
+ * 速度与音调 → 智能调音（每个曲风可挑任意预设）。
+ */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun EqualizerScreen(onBack: () -> Unit) {
@@ -79,10 +89,16 @@ fun EqualizerScreen(onBack: () -> Unit) {
     var smartEq by remember { mutableStateOf(Prefs.smartEq) }
     val lastApplied by SmartEq.lastApplied.collectAsState()
     val bands by EqualizerHost.bands.collectAsState()
-    val preset by EqualizerHost.preset.collectAsState()
+    val presets by EqualizerHost.presets.collectAsState()
+    val selectedPreset by EqualizerHost.selectedPreset.collectAsState()
+    var genreMapVersion by remember { mutableStateOf(0) }
     val bass by EqualizerHost.bass.collectAsState()
     val freqs = remember { EqualizerHost.bandFreqs }
-    val presets = remember { EqualizerHost.presetNames }
+
+    // 弹窗状态
+    var showAddDialog by remember { mutableStateOf(false) }
+    var deleteTarget by remember { mutableStateOf<EqPreset?>(null) }
+    var genrePick by remember { mutableStateOf<Pair<Int, String>?>(null) }   // 曲风码 → 中文名
 
     Column(
         Modifier
@@ -99,46 +115,20 @@ fun EqualizerScreen(onBack: () -> Unit) {
             Column(
                 Modifier.fillMaxWidth().shadeSurface(cornerRadius = 24.dp, offset = 6.dp, blur = 10.dp).padding(12.dp),
             ) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(46.dp)
-                        // 位于凸起卡内：启用=凹陷，停用=平（凸起中以凹陷表选中）
-                        .then(
-                            if (enabled) Modifier.shadeInset(cornerRadius = 16.dp, offset = 3.dp, blur = 5.dp)
-                            else Modifier
-                        )
-                        .flatTap { EqualizerHost.setEnabled(!enabled) }
-                        .padding(horizontal = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "启用均衡器",
-                        fontSize = 14.sp,
-                        color = if (enabled) colors.accent else colors.textPrimary,
-                        fontWeight = if (enabled) FontWeight.SemiBold else FontWeight.Normal,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(
-                        if (enabled) "开" else "关",
-                        fontSize = 13.sp,
-                        color = if (enabled) colors.accent else colors.textTertiary,
-                        fontWeight = FontWeight.Medium,
-                    )
-                }
+                ToggleRow("启用均衡器", enabled) { EqualizerHost.setEnabled(!enabled) }
             }
             Spacer(Modifier.height(18.dp))
 
-            // ── 预设 ──
+            // ── 预设：全部可改；长按自建预设删除；「新增」以当前频段值入库 ──
             SectionCard(title = "预设") {
                 androidx.compose.foundation.layout.FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    presets.forEachIndexed { i, name ->
-                        val selected = preset == i
+                    presets.forEach { p ->
+                        val selected = selectedPreset == p.name
                         Text(
-                            name,
+                            p.name,
                             fontSize = 13.sp,
                             color = if (selected) colors.accent else colors.textPrimary,
                             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
@@ -147,29 +137,31 @@ fun EqualizerScreen(onBack: () -> Unit) {
                                     if (selected) Modifier.shadeInset(cornerRadius = 14.dp, offset = 3.dp, blur = 4.dp)
                                     else Modifier
                                 )
-                                .flatTap { EqualizerHost.setPreset(i) }
+                                .pointerInput(p.name, p.builtin) {
+                                    detectTapGestures(
+                                        onTap = { EqualizerHost.selectPreset(p.name) },
+                                        onLongPress = { if (!p.builtin) deleteTarget = p },
+                                    )
+                                }
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                         )
                     }
-                    val custom = preset == -1
+                    // 新增预设（以当前滑杆值为初始值）
                     Text(
-                        "自定义",
+                        "＋ 新预设",
                         fontSize = 13.sp,
-                        color = if (custom) colors.accent else colors.textPrimary,
-                        fontWeight = if (custom) FontWeight.SemiBold else FontWeight.Normal,
+                        color = colors.accent,
+                        fontWeight = FontWeight.Medium,
                         modifier = Modifier
-                            .then(
-                                if (custom) Modifier.shadeInset(cornerRadius = 14.dp, offset = 3.dp, blur = 4.dp)
-                                else Modifier
-                            )
-                            .flatTap {
-                                // 选自定义 = 以当前频段值进入手调模式
-                                Prefs.eqPreset = -1
-                                EqualizerHost.setPreset(-1)
-                            }
+                            .flatTap { showAddDialog = true }
                             .padding(horizontal = 12.dp, vertical = 8.dp),
                     )
                 }
+                Text(
+                    "选中预设后拖动频段会直接改这个预设；长按自建预设可删除。",
+                    fontSize = 11.sp, color = colors.textTertiary,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                )
             }
             Spacer(Modifier.height(18.dp))
 
@@ -192,10 +184,6 @@ fun EqualizerScreen(onBack: () -> Unit) {
                         }
                     }
                 }
-                Text(
-                    "拖动频段后进入「自定义」；标准档下拖动任意频段会自动切换。",
-                    fontSize = 11.sp, color = colors.textTertiary, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                )
             }
             Spacer(Modifier.height(18.dp))
 
@@ -220,32 +208,7 @@ fun EqualizerScreen(onBack: () -> Unit) {
             if (dynamicsAvailable) {
                 Spacer(Modifier.height(18.dp))
                 SectionCard(title = "动态范围压缩 (DVC)") {
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .height(46.dp)
-                            .then(
-                                if (dvc) Modifier.shadeInset(cornerRadius = 16.dp, offset = 3.dp, blur = 5.dp)
-                                else Modifier
-                            )
-                            .flatTap { DynamicsFxHost.setDvc(!dvc) }
-                            .padding(horizontal = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            "压低响度差",
-                            fontSize = 14.sp,
-                            color = if (dvc) colors.accent else colors.textPrimary,
-                            fontWeight = if (dvc) FontWeight.SemiBold else FontWeight.Normal,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text(
-                            if (dvc) "开" else "关",
-                            fontSize = 13.sp,
-                            color = if (dvc) colors.accent else colors.textTertiary,
-                            fontWeight = FontWeight.Medium,
-                        )
-                    }
+                    ToggleRow("压低响度差", dvc) { DynamicsFxHost.setDvc(!dvc) }
                     Text(
                         "副歌不再突然炸耳，夜间/通勤听歌更舒适；对音质有轻微影响，默认关闭。",
                         fontSize = 11.sp, color = colors.textTertiary,
@@ -330,46 +293,174 @@ fun EqualizerScreen(onBack: () -> Unit) {
                 }
             }
 
-            // ── 智能调音 ──
+            // ── 智能调音：每个曲风可以挑任意预设 ──
             Spacer(Modifier.height(18.dp))
             SectionCard(title = "智能调音") {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(46.dp)
-                        .then(
-                            if (smartEq) Modifier.shadeInset(cornerRadius = 16.dp, offset = 3.dp, blur = 5.dp)
-                            else Modifier
-                        )
-                        .flatTap {
-                            Prefs.smartEq = !smartEq
-                            smartEq = !smartEq
-                        }
-                        .padding(horizontal = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "按曲目风格自动选预设",
-                        fontSize = 14.sp,
-                        color = if (smartEq) colors.accent else colors.textPrimary,
-                        fontWeight = if (smartEq) FontWeight.SemiBold else FontWeight.Normal,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(
-                        if (smartEq) "开" else "关",
-                        fontSize = 13.sp,
-                        color = if (smartEq) colors.accent else colors.textTertiary,
-                        fontWeight = FontWeight.Medium,
-                    )
+                ToggleRow("按曲目风格自动选预设", smartEq) {
+                    Prefs.smartEq = !smartEq
+                    smartEq = !smartEq
                 }
                 Text(
-                    lastApplied ?: "开启后换歌时自动套用（流行→Pop、摇滚→Rock、古典→Classical…）",
+                    lastApplied ?: "开启后换歌时按下面的映射自动套用预设。",
                     fontSize = 11.sp, color = colors.textTertiary,
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+                Spacer(Modifier.height(4.dp))
+                androidx.compose.foundation.layout.FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    // key 加版本号：改完映射让 chips 重组刷新
+                    androidx.compose.runtime.key(genreMapVersion) {
+                        SmartEq.GENRES.forEach { (code, label) ->
+                            val mapped = EqualizerHost.genreMap()[code] ?: "未映射"
+                            Text(
+                                "$label · $mapped",
+                                fontSize = 12.sp,
+                                color = colors.textPrimary,
+                                modifier = Modifier
+                                    .flatTap { genrePick = code to label }
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                            )
+                        }
+                    }
+                }
+                Text(
+                    "点某个曲风可为它挑预设（含自建预设）。",
+                    fontSize = 11.sp, color = colors.textTertiary,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                 )
             }
 
             Spacer(Modifier.height(132.dp))   // 底部留白（播放栏）
+        }
+    }
+
+    // ── 弹窗们 ──
+    if (showAddDialog) {
+        AddPresetDialog(
+            onDismiss = { showAddDialog = false },
+            onConfirm = { name ->
+                EqualizerHost.addPreset(name)
+                showAddDialog = false
+                toastMain(ctx, "已新增预设「${name.trim().ifEmpty { "新预设" }}」")
+            },
+        )
+    }
+    deleteTarget?.let { p ->
+        ShadeDialog(onDismiss = { deleteTarget = null }, title = "删除预设") {
+            Text(
+                "确定删除「${p.name}」？此操作不可撤销。",
+                color = colors.textSecondary, fontSize = 13.sp,
+                modifier = Modifier.padding(horizontal = 20.dp),
+            )
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "取消", color = colors.textSecondary, fontSize = 14.sp,
+                    modifier = Modifier.flatTap { deleteTarget = null }.padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+                Text(
+                    "删除", color = colors.accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.flatTap {
+                        EqualizerHost.deletePreset(p.name)
+                        deleteTarget = null
+                    }.padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+            }
+        }
+    }
+    genrePick?.let { (code, label) ->
+        // 打开弹窗那一刻快照预设列表（自建/删除后重新打开即是新表）
+        val snapshot = EqualizerHost.presets.value
+        ShadeDialog(onDismiss = { genrePick = null }, title = "$label 映射到哪个预设？") {
+            androidx.compose.foundation.lazy.LazyColumn(Modifier.height(320.dp)) {
+                items(snapshot.size) { i ->
+                    ShadeDialogRow(snapshot[i].name) {
+                        EqualizerHost.setGenrePreset(code, snapshot[i].name)
+                        genreMapVersion++
+                        genrePick = null
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 凸起卡内的开关行：启用=凹陷，停用=平（凸起中以凹陷表选中）。 */
+@Composable
+private fun ToggleRow(label: String, on: Boolean, onTap: () -> Unit) {
+    val colors = LocalShadeColors.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(46.dp)
+            .then(
+                if (on) Modifier.shadeInset(cornerRadius = 16.dp, offset = 3.dp, blur = 5.dp)
+                else Modifier
+            )
+            .flatTap(onTap)
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            fontSize = 14.sp,
+            color = if (on) colors.accent else colors.textPrimary,
+            fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            if (on) "开" else "关",
+            fontSize = 13.sp,
+            color = if (on) colors.accent else colors.textTertiary,
+            fontWeight = FontWeight.Medium,
+        )
+    }
+}
+
+/** 新增预设弹窗：输入名字，以当前频段值入库。 */
+@Composable
+private fun AddPresetDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+    val colors = LocalShadeColors.current
+    var name by remember { mutableStateOf("") }
+    ShadeDialog(onDismiss = onDismiss, title = "新增预设") {
+        Text(
+            "以当前频段滑杆的值创建一个新预设。",
+            color = colors.textTertiary, fontSize = 12.sp,
+            modifier = Modifier.padding(horizontal = 20.dp),
+        )
+        BasicTextField(
+            value = name,
+            onValueChange = { name = it },
+            singleLine = true,
+            textStyle = androidx.compose.ui.text.TextStyle(
+                color = colors.textPrimary, fontSize = 15.sp,
+            ),
+            cursorBrush = SolidColor(colors.accent),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 12.dp)
+                .background(colors.background, RoundedCornerShape(12.dp))
+                .shadeInset(cornerRadius = 12.dp, offset = 2.dp, blur = 3.dp)
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+        )
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 14.dp),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "取消", color = colors.textSecondary, fontSize = 14.sp,
+                modifier = Modifier.flatTap(onDismiss).padding(horizontal = 12.dp, vertical = 6.dp),
+            )
+            Text(
+                "创建", color = colors.accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.flatTap { onConfirm(name) }.padding(horizontal = 12.dp, vertical = 6.dp),
+            )
         }
     }
 }

@@ -65,6 +65,11 @@ import com.neumusic.player.ui.common.doubleTapToTop
 import com.neumusic.player.ui.common.HorizontalEdgeFades
 import com.neumusic.player.ui.common.VerticalEdgeFades
 import com.neumusic.player.ui.Nav
+import com.neumusic.player.ui.Hero
+import com.neumusic.player.ui.NavRequest
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 
 /** 随机问候语（未登录时用，不带用户名）。 */
 private val GREETINGS_NO_NAME = listOf(
@@ -100,7 +105,7 @@ private fun greetingForHour(hour: Int): String {
 fun HomeScreen(
     onOpenSearch: () -> Unit,
     onOpenSettings: () -> Unit,
-    onOpenDest: (Nav) -> Unit,
+    onOpenDest: (NavRequest) -> Unit,
 ) {
     val colors = LocalShadeColors.current
     val ctx = LocalContext.current
@@ -196,7 +201,7 @@ fun HomeScreen(
         item {
             Section(
                 title = "收藏的歌单",
-                onMore = { onOpenDest(Nav.Playlists) },
+                onMore = { onOpenDest(NavRequest(Nav.Playlists)) },
                 // 「我喜欢」始终在，所以这一栏永远不为空；未登录时只显示它。
                 empty = false,
                 emptyText = "",
@@ -204,10 +209,14 @@ fun HomeScreen(
                 HomeCardRow {
                     // 「我喜欢」固定排第一（用户要求），再跟收藏的歌单。
                     item {
-                        LikedCard(likedCount) { onOpenDest(Nav.Liked) }
+                        LikedCard(likedCount) { b -> onOpenDest(NavRequest(Nav.Liked, b, Hero.Heart)) }
                     }
                     items(playlists) { p ->
-                        PlaylistCard(p) { onOpenDest(Nav.PlaylistDetail(p.tid, p.name, p.songnum)) }
+                        PlaylistCard(p) { b ->
+                            val hero = if (p.name == "我喜欢" || p.tid == 201L) Hero.Heart
+                            else if (p.logo.isNotEmpty()) Hero.Image(p.logo) else null
+                            onOpenDest(NavRequest(Nav.PlaylistDetail(p.tid, p.name, p.songnum), b, hero))
+                        }
                     }
                 }
             }
@@ -216,7 +225,7 @@ fun HomeScreen(
         item {
             Section(
                 title = "收藏的专辑",
-                onMore = { onOpenDest(Nav.Albums) },
+                onMore = { onOpenDest(NavRequest(Nav.Albums)) },
                 empty = albums.isEmpty(),
                 emptyText = when {
                     !albumsLoaded -> "加载中…"
@@ -226,7 +235,10 @@ fun HomeScreen(
             ) {
                 HomeCardRow {
                     items(albums) { a ->
-                        AlbumCard(a) { onOpenDest(Nav.AlbumDetail(a.mid, a.name, a.songnum)) }
+                        AlbumCard(a) { b ->
+                            val hero = if (a.logo.isNotEmpty()) Hero.Image(a.logo) else null
+                            onOpenDest(NavRequest(Nav.AlbumDetail(a.mid, a.name, a.songnum), b, hero))
+                        }
                     }
                 }
             }
@@ -247,8 +259,8 @@ fun HomeScreen(
                 Section(title = g.title, onMore = null, empty = false, emptyText = "") {
                     HomeCardRow(spacing = 12.dp) {
                         items(g.stations) { s ->
-                            StationCard(s.title, s.picUrl) {
-                                onOpenDest(Nav.RadioDetail(s.id, s.title))
+                            StationCard(s.title, s.picUrl) { b ->
+                                onOpenDest(NavRequest(Nav.RadioDetail(s.id, s.title), b, Hero.Image(s.picUrl)))
                             }
                         }
                     }
@@ -269,11 +281,13 @@ fun HomeScreen(
 
 /** 电台卡片（主页栏目的横向单元）。 */
 @Composable
-private fun StationCard(title: String, picUrl: String, onClick: () -> Unit) {
+private fun StationCard(title: String, picUrl: String, onClick: (Rect) -> Unit) {
     val colors = LocalShadeColors.current
+    var bounds by remember { mutableStateOf(Rect.Zero) }
     Column(
         Modifier.width(104.dp)
-            .shadePressable(cornerRadius = 18.dp, offset = 5.dp, blur = 8.dp, onClick = onClick)
+            .onGloballyPositioned { bounds = it.boundsInRoot() }
+            .shadePressable(cornerRadius = 18.dp, offset = 5.dp, blur = 8.dp) { onClick(bounds) }
             .padding(6.dp),
     ) {
         Box(Modifier.size(92.dp), contentAlignment = Alignment.Center) {
@@ -357,11 +371,13 @@ private fun Section(
  * 与其它卡片同样是**凸起卡片**，内部只有无背景的爱心图标（不构成凸起套凸起）。
  */
 @Composable
-private fun LikedCard(count: Int?, onClick: () -> Unit) {
+private fun LikedCard(count: Int?, onClick: (Rect) -> Unit) {
     val colors = LocalShadeColors.current
+    var bounds by remember { mutableStateOf(Rect.Zero) }
     Column(
         Modifier.width(104.dp)
-            .shadePressable(cornerRadius = 18.dp, offset = 5.dp, blur = 8.dp, onClick = onClick)
+            .onGloballyPositioned { bounds = it.boundsInRoot() }
+            .shadePressable(cornerRadius = 18.dp, offset = 5.dp, blur = 8.dp) { onClick(bounds) }
             .padding(6.dp),
     ) {
         Box(Modifier.size(92.dp), contentAlignment = Alignment.Center) {
@@ -386,11 +402,14 @@ private fun LikedCard(count: Int?, onClick: () -> Unit) {
 
 /** 歌单卡片：凸起底盘 + 封面；无封面用首字母占位；「我喜欢」用无背景爱心。 */
 @Composable
-private fun PlaylistCard(item: PlaylistItem, onClick: () -> Unit) {
+private fun PlaylistCard(item: PlaylistItem, onClick: (Rect) -> Unit) {
     val colors = LocalShadeColors.current
     val isLiked = item.name == "我喜欢" || item.tid == 201L
+    var bounds by remember { mutableStateOf(Rect.Zero) }
     Column(
-        Modifier.width(104.dp).shadePressable(cornerRadius = 18.dp, offset = 5.dp, blur = 8.dp, onClick = onClick)
+        Modifier.width(104.dp)
+            .onGloballyPositioned { bounds = it.boundsInRoot() }
+            .shadePressable(cornerRadius = 18.dp, offset = 5.dp, blur = 8.dp) { onClick(bounds) }
             .padding(6.dp),
     ) {
         Box(Modifier.size(92.dp), contentAlignment = Alignment.Center) {
@@ -419,10 +438,13 @@ private fun PlaylistCard(item: PlaylistItem, onClick: () -> Unit) {
 }
 
 @Composable
-private fun AlbumCard(item: AlbumItem, onClick: () -> Unit) {
+private fun AlbumCard(item: AlbumItem, onClick: (Rect) -> Unit) {
     val colors = LocalShadeColors.current
+    var bounds by remember { mutableStateOf(Rect.Zero) }
     Column(
-        Modifier.width(104.dp).shadePressable(cornerRadius = 18.dp, offset = 5.dp, blur = 8.dp, onClick = onClick)
+        Modifier.width(104.dp)
+            .onGloballyPositioned { bounds = it.boundsInRoot() }
+            .shadePressable(cornerRadius = 18.dp, offset = 5.dp, blur = 8.dp) { onClick(bounds) }
             .padding(6.dp),
     ) {
         Box(Modifier.size(92.dp), contentAlignment = Alignment.Center) {
