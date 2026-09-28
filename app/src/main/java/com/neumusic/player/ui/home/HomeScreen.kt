@@ -65,7 +65,6 @@ import com.neumusic.player.ui.common.doubleTapToTop
 import com.neumusic.player.ui.common.HorizontalEdgeFades
 import com.neumusic.player.ui.common.VerticalEdgeFades
 import com.neumusic.player.ui.Nav
-import com.neumusic.player.ui.Hero
 import com.neumusic.player.ui.NavRequest
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.boundsInRoot
@@ -209,14 +208,10 @@ fun HomeScreen(
                 HomeCardRow {
                     // 「我喜欢」固定排第一（用户要求），再跟收藏的歌单。
                     item {
-                        LikedCard(likedCount) { b -> onOpenDest(NavRequest(Nav.Liked, b, Hero.Heart)) }
+                        LikedCard(likedCount) { b -> onOpenDest(NavRequest(Nav.Liked, b)) }
                     }
                     items(playlists) { p ->
-                        PlaylistCard(p) { b ->
-                            val hero = if (p.name == "我喜欢" || p.tid == 201L) Hero.Heart
-                            else if (p.logo.isNotEmpty()) Hero.Image(p.logo) else null
-                            onOpenDest(NavRequest(Nav.PlaylistDetail(p.tid, p.name, p.songnum), b, hero))
-                        }
+                        PlaylistCard(p) { b -> onOpenDest(NavRequest(Nav.PlaylistDetail(p.tid, p.name, p.songnum), b)) }
                     }
                 }
             }
@@ -235,10 +230,7 @@ fun HomeScreen(
             ) {
                 HomeCardRow {
                     items(albums) { a ->
-                        AlbumCard(a) { b ->
-                            val hero = if (a.logo.isNotEmpty()) Hero.Image(a.logo) else null
-                            onOpenDest(NavRequest(Nav.AlbumDetail(a.mid, a.name, a.songnum), b, hero))
-                        }
+                        AlbumCard(a) { b -> onOpenDest(NavRequest(Nav.AlbumDetail(a.mid, a.name, a.songnum), b)) }
                     }
                 }
             }
@@ -259,9 +251,7 @@ fun HomeScreen(
                 Section(title = g.title, onMore = null, empty = false, emptyText = "") {
                     HomeCardRow(spacing = 12.dp) {
                         items(g.stations) { s ->
-                            StationCard(s.title, s.picUrl) { b ->
-                                onOpenDest(NavRequest(Nav.RadioDetail(s.id, s.title), b, Hero.Image(s.picUrl)))
-                            }
+                            StationCard(s.title, s.picUrl) { b -> onOpenDest(NavRequest(Nav.RadioDetail(s.id, s.title), b)) }
                         }
                     }
                 }

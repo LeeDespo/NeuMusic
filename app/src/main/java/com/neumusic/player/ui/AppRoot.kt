@@ -2,6 +2,7 @@ package com.neumusic.player.ui
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -30,6 +31,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -96,14 +98,15 @@ import kotlinx.coroutines.launch
  * 播放页重新从底部升起盖住音效页，动画结束后才把音效页真正弹出栈**（早前立即弹栈，
  * 底下的页面闪现一下再重放升起动画——实测踩过）。
  *
- * 一二级页面切换是**整体场景缩放（摄像机推拉）**，不是单卡片形变：
- * - 进入：整个一级场景（背景+列表+所有卡片）绕「卡片中心」整体放大，相机中心从
- *   屏幕中心滑向卡片中心，卡片区域最终铺满整个屏幕；二级页面作为**整个根容器**
- *   从卡片矩形长到全屏（内容随展开淡入，卡片封面随之淡出）。
- * - 返回：同一条曲线精确倒放——二级页面整个根容器缩回卡片矩形，一级场景同步回缩，
- *   露出原样的一级页面。
- * - 实现上二级页面用 rect 插值（scaleX/scaleY + translation，origin 取左上角），
- *   一级场景用 uniform 相机（scale + 平移），见 [ZoomPage] 与底层 graphicsLayer。
+ * 一二级页面切换是**整体场景缩放（摄像机推拉）**，操作对象是一级页面的根容器：
+ * - 进入：整个一级场景（背景+列表+所有卡片）做 scale + translation——uniform 缩放
+ *   放大、相机中心从屏幕中心滑向卡片中心（卡片只是焦点），卡片区域最终铺满屏幕；
+ *   放大完成后二级页面才整屏淡入（末段 crossfade，无跳变）。
+ * - 返回：同一条 tween(400, FastOutSlowInEasing) 精确倒放——二级页面先淡出，
+ *   场景再回缩，露出原样的一级页面。
+ * - **性能关键**：推拉进度只能被 graphicsLayer 的 lambda 读取（图层属性逐帧更新，
+ *   不触发重组）；在组合期读 Animatable.value 会让 AppRoot 每帧整树重组（实测卡死）。
+ *   真实页面内容推迟到 t>0.7 才组合，起播帧保持轻。
  */
 @Composable
 fun AppRoot() {
@@ -118,7 +121,7 @@ fun AppRoot() {
 
     fun open(req: NavRequest) {
         if (morphBack || eqPopPending) return   // 转场进行中不接新入口（快速连点防护）
-        stack.add(StackEntry(req.nav, req.origin, req.hero))
+        stack.add(StackEntry(req.nav, req.origin))
     }
 
     // 弹出栈顶。栈底（主页）不弹——交还系统处理（退出 App）。
@@ -187,9 +190,9 @@ fun AppRoot() {
             }
         }
     }
-    val zoomT = zoomAnimatable.value
-    // t≈1（已落定）时底层按原样渲染——它被二级页面完全盖住，省掉整场景的放大绘制。
-    val zoomActive = morphEntry != null && zoomT < 0.999f
+    // 落定后场景按原样渲染（被二级页面完全盖住，省掉整场景的放大绘制）；
+    // 该布尔只在进场完成/返回开始时翻转一次——绝不能在组合期读 Animatable.value。
+    val zoomSteady = morphEntry != null && morphEntry.settled && !morphBack
     val underNav = when {
         morphEntry != null -> stack.getOrNull(lastOriginIdx - 1)?.nav ?: Nav.Home
         else -> (stack.lastOrNull { it.nav != Nav.Player } ?: stack.first()).nav
@@ -202,15 +205,17 @@ fun AppRoot() {
                 .fillMaxSize()
                 .onSizeChanged { sceneSize = it }
                 .graphicsLayer {
+                    // 只在图层 lambda 里读推拉进度：逐帧更新图层属性，零重组
                     val entry = morphEntry
-                    if (zoomActive && entry != null && sceneSize != IntSize.Zero) {
+                    if (!zoomSteady && entry != null && sceneSize != IntSize.Zero) {
                         val o = entry.origin ?: return@graphicsLayer
                         val w = sceneSize.width.toFloat()
                         val h = sceneSize.height.toFloat()
+                        val t = zoomAnimatable.value
                         val s = maxOf(w / o.width, h / o.height)   // 卡片区域恰好铺满屏幕
-                        val z = 1f + (s - 1f) * zoomT
-                        val cx = lerp(w / 2f, o.center.x, zoomT)   // 相机中心滑向卡片中心
-                        val cy = lerp(h / 2f, o.center.y, zoomT)
+                        val z = 1f + (s - 1f) * t
+                        val cx = lerp(w / 2f, o.center.x, t)       // 相机中心滑向卡片中心
+                        val cy = lerp(h / 2f, o.center.y, t)
                         transformOrigin = TransformOrigin(0f, 0f)
                         scaleX = z
                         scaleY = z
@@ -249,13 +254,12 @@ fun AppRoot() {
             )
         }
 
-        // ── 二级页面：整个根容器从卡片矩形长到全屏（推拉的另一端）──
-        if (morphEntry != null && sceneSize != IntSize.Zero) {
-            ZoomPage(
+        // ── 二级页面：放大完成后整屏淡入（推拉的最后一站）──
+        if (morphEntry != null) {
+            SecondPageOverlay(
                 entry = morphEntry,
-                t = zoomT,
-                screenW = sceneSize.width.toFloat(),
-                screenH = sceneSize.height.toFloat(),
+                progress = zoomAnimatable.asState(),
+                steady = zoomSteady,
                 onOpen = ::open,
                 onBack = ::back,
             )
@@ -348,100 +352,40 @@ private fun PageContent(
 private fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t
 
 /**
- * 推拉动画的二级页面端：整个页面根容器从来源卡片矩形插值到全屏。
- *
- * rect 插值用 scaleX/scaleY + translation（origin 取左上角）实现——内容随容器
- * 一起缩放（这就是「整个页面缩小成卡片大小/从卡片长开」），进场时真实内容随
- * 展开淡入、卡片封面随之淡出；两端状态与卡片/全屏完全一致，进出可逆。
- * 圆角补偿：clip 形状定义在未变换的本地坐标里，除以缩放后屏幕上才是真实圆角。
- *
- * 性能要点：真实页面内容**推迟到 t>0.15 才组合**——起播帧只组合外壳+封面（轻），
- * 重活挪进飞行途中被运动掩盖；否则起播帧一次性组合整页会掉帧（实测"顿一顿"）。
- * 封面 hero 按**卡片真实布局**起帧：上方内边距方形封面（非铺满矩形），
- * 否则封面在起帧被拉伸变形（实测踩过）。
+ * 推拉的二级页面端：**不做容器动画**——场景缩放才是主角，二级页面整屏待命，
+ * 在推拉的最后四分之一淡入（带一点 1.06→1 的回落），与放大末态 crossfade 无缝衔接。
+ * 进度只从图层 lambda 里读（零重组）；落定后按普通页面渲染。
  */
 @Composable
-private fun ZoomPage(
+private fun SecondPageOverlay(
     entry: StackEntry,
-    t: Float,
-    screenW: Float,
-    screenH: Float,
+    progress: androidx.compose.runtime.State<Float>,
+    steady: Boolean,
     onOpen: (NavRequest) -> Unit,
     onBack: () -> Unit,
 ) {
     val colors = LocalShadeColors.current
-    val o = entry.origin ?: return
-    val rectLeft = lerp(o.left, 0f, t)
-    val rectTop = lerp(o.top, 0f, t)
-    val rectW = lerp(o.width, screenW, t)
-    val rectH = lerp(o.height, screenH, t)
-    val scaleXC = (rectW / screenW).coerceAtLeast(0.0001f)
-    val scaleYC = (rectH / screenH).coerceAtLeast(0.0001f)
-    val cornerLocal = lerp(18f / scaleXC, 0f, t).coerceAtLeast(0f)
-    val contentAlpha = ((t - 0.25f) / 0.5f).coerceIn(0f, 1f)
-    val heroAlpha = 1f - ((t - 0.2f) / 0.55f).coerceIn(0f, 1f)
-
-    val steady = t >= 0.999f
     if (steady) {
         Box(Modifier.fillMaxSize().zIndex(3f).background(colors.background)) {
             PageContent(nav = entry.nav, onOpen = onOpen, onBack = onBack)
         }
         return
     }
+    val showContent by remember { derivedStateOf { progress.value > 0.7f } }
+    if (!showContent) return
     Box(
         Modifier
             .fillMaxSize()
             .zIndex(3f)
             .graphicsLayer {
-                transformOrigin = TransformOrigin(0f, 0f)
-                scaleX = scaleXC
-                scaleY = scaleYC
-                translationX = rectLeft
-                translationY = rectTop
-            }
-            .clip(RoundedCornerShape(cornerLocal.dp))
-            .background(colors.background),
+                val a = ((progress.value - 0.75f) / 0.25f).coerceIn(0f, 1f)
+                alpha = a
+                val sc = 1f + 0.06f * (1f - a)
+                scaleX = sc
+                scaleY = sc
+            },
     ) {
-        // 卡片母体（封面/爱心）先画，展开过程里淡出——t=0 时与卡片视觉一致：
-        // 上方内边距的方形封面 + 圆角，随展开放大到铺满，不是一上来就铺满整个矩形
-        if (heroAlpha > 0f) {
-            Column(
-                Modifier.fillMaxSize().graphicsLayer { alpha = heroAlpha },
-            ) {
-                val pad = 6f * (1f - t)
-                val coverCorner = (14f / scaleXC) * (1f - t)
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = pad.dp, vertical = pad.dp)
-                        .aspectRatio(1f)
-                        .clip(RoundedCornerShape(coverCorner.coerceAtLeast(0f).dp)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    when (val hero = entry.hero) {
-                        is Hero.Image -> AsyncImage(
-                            model = hero.url,
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                        is Hero.Heart -> Icon(
-                            Icons.Filled.Favorite,
-                            contentDescription = null,
-                            tint = colors.accent,
-                            modifier = Modifier.size((44f + 60f * t).dp),
-                        )
-                        null -> Unit
-                    }
-                }
-            }
-        }
-        // 真实页面内容：飞过起播帧后再组合（重活被运动掩盖），随展开淡入
-        if (t > 0.15f) {
-            Box(Modifier.fillMaxSize().graphicsLayer { alpha = contentAlpha }) {
-                PageContent(nav = entry.nav, onOpen = onOpen, onBack = onBack)
-            }
-        }
+        PageContent(nav = entry.nav, onOpen = onOpen, onBack = onBack)
     }
 }
 

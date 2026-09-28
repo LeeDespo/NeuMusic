@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -32,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.neumusic.player.data.AlbumItem
@@ -48,24 +50,22 @@ import com.neumusic.player.shade.LocalShadeColors
 import com.neumusic.player.shade.flatPressable
 import com.neumusic.player.shade.shadePressable
 import com.neumusic.player.ui.common.AlbumArt
-import com.neumusic.player.ui.common.CollapsingTopBar
 import com.neumusic.player.ui.common.RowDivider
 import com.neumusic.player.ui.common.TrackListBlock
 import com.neumusic.player.ui.common.VerticalEdgeFades
 import com.neumusic.player.ui.common.TrackRow
 import com.neumusic.player.ui.common.playQueue
 import com.neumusic.player.ui.common.doubleTapToTop
-import com.neumusic.player.ui.common.rememberTopBarVisible
 import com.neumusic.player.ui.common.toastMain
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.runtime.mutableStateListOf
 import com.neumusic.player.data.DownloadStore
 import com.neumusic.player.player.PlayerHost
 import com.neumusic.player.ui.common.SelectionBar
-import com.neumusic.player.ui.common.TopBarContentSwitch
 import com.neumusic.player.ui.common.TrackFormatsDialog
 import com.neumusic.player.ui.common.TrackInfoDialog
 import com.neumusic.player.ui.common.TrackMoreDialog
@@ -236,10 +236,9 @@ fun TrackListScreen(
         if (!footerVisible) retriedVisible = false
     }
 
-    val barVisible = rememberTopBarVisible(listState)
-
     Box(Modifier.fillMaxSize().background(colors.background)) {
         val list = tracks
+        val downloadRot = downloadIconRotation(selecting)
         when {
             !loaded -> LoadingBox()
             failed && list.isEmpty() -> EmptyBox("加载失败，请稍后重试")
@@ -249,11 +248,30 @@ fun TrackListScreen(
                 modifier = Modifier.fillMaxSize().doubleTapToTop(listState),
                 contentPadding = PaddingValues(
                     start = 16.dp, end = 16.dp,
-                    top = 84.dp,
+                    top = 8.dp,
                     // 底部留白：让最后一行能滚到播放栏之上，而不是被压住。
                     bottom = 132.dp,
                 ),
             ) {
+                // 顶栏和主页一样是页面的一部分：往上滑就跟着滚走，不再悬浮折叠
+                item(key = "topbar") {
+                    ListTopBarRow(title, onBack) {
+                        Box(
+                            Modifier.size(42.dp)
+                                .graphicsLayer { rotationZ = downloadRot }
+                                .shadePressable(cornerRadius = 21.dp, offset = 4.dp, blur = 6.dp) {
+                                    selecting = !selecting
+                                    if (!selecting) selectedMids.clear()
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                Icons.Filled.Download, "选择下载",
+                                tint = colors.accent, modifier = Modifier.size(20.dp),
+                            )
+                        }
+                    }
+                }
                 item {
                     TrackListBlock {
                         list.forEachIndexed { i, t ->
@@ -290,68 +308,39 @@ fun TrackListScreen(
             }
         }
 
-        // 顶栏：普通态（返回/标题/下载）↔ 选择态（全选/反选/取消/下载所选）
-        val downloadRot = downloadIconRotation(selecting)
-        TopBarContentSwitch(
-            selecting = selecting,
-            modifier = Modifier.align(Alignment.TopCenter).zIndex(2f),
-            normal = {
-                CollapsingTopBar(
-                    title = title,
-                    onBack = onBack,
-                    visible = barVisible,
-                    trailing = {
-                        // 下载触发按钮（页面底色上，凸起合规）
-                        Box(
-                            Modifier
-                                .size(42.dp)
-                                .graphicsLayer { rotationZ = downloadRot }
-                                .shadePressable(cornerRadius = 21.dp, offset = 4.dp, blur = 6.dp) {
-                                    selecting = !selecting
-                                    if (!selecting) selectedMids.clear()
-                                },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                Icons.Filled.Download, "选择下载",
-                                tint = colors.accent, modifier = Modifier.size(20.dp),
-                            )
+        // 选择模式：固定覆盖条（全选/反选/取消/下载所选）；普通态无覆盖顶栏
+        if (selecting) {
+            SelectionBar(
+                selecting = selecting,
+                selectedCount = selectedMids.size,
+                downloading = downloadProgress,
+                onSelectAll = {
+                    selectedMids.clear()
+                    list.filter { !downloadedMap.containsKey(it.mid) }
+                        .forEach { selectedMids.add(it.mid) }
+                },
+                onInvert = {
+                    val invert = list.filter { !downloadedMap.containsKey(it.mid) }
+                        .map { it.mid to (it.mid !in selectedMids) }
+                    selectedMids.clear()
+                    invert.forEach { (mid, sel) -> if (sel) selectedMids.add(mid) }
+                },
+                onCancel = { selecting = false; selectedMids.clear() },
+                onDownload = {
+                    scope.launch {
+                        val picks = list.filter { it.mid in selectedMids }
+                        picks.forEachIndexed { idx, t ->
+                            downloadProgress = "${idx + 1}/${picks.size}"
+                            runCatching { Downloader.download(ctx, t) }
                         }
-                    },
-                )
-            },
-            selection = {
-                SelectionBar(
-                    selecting = selecting,
-                    selectedCount = selectedMids.size,
-                    downloading = downloadProgress,
-                    onSelectAll = {
+                        downloadProgress = null
                         selectedMids.clear()
-                        list.filter { !downloadedMap.containsKey(it.mid) }
-                            .forEach { selectedMids.add(it.mid) }
-                    },
-                    onInvert = {
-                        val invert = list.filter { !downloadedMap.containsKey(it.mid) }
-                            .map { it.mid to (it.mid !in selectedMids) }
-                        selectedMids.clear()
-                        invert.forEach { (mid, sel) -> if (sel) selectedMids.add(mid) }
-                    },
-                    onCancel = { selecting = false; selectedMids.clear() },
-                    onDownload = {
-                        scope.launch {
-                            val picks = list.filter { it.mid in selectedMids }
-                            picks.forEachIndexed { idx, t ->
-                                downloadProgress = "${idx + 1}/${picks.size}"
-                                runCatching { Downloader.download(ctx, t) }
-                            }
-                            downloadProgress = null
-                            selectedMids.clear()
-                            selecting = false
-                        }
-                    },
-                )
-            },
-        )
+                        selecting = false
+                    }
+                },
+                modifier = Modifier.align(Alignment.TopCenter).zIndex(2f),
+            )
+        }
     }
 
     // 「更多」弹窗（tracks 是已加载全量）
@@ -487,6 +476,35 @@ private fun likeFailMessage(code: Int): String = when (code) {
     else -> "操作失败（错误码 $code）"
 }
 
+
+/** 列表页的顶栏行：放在列表第一项里，随内容一起滚走（与主页一致，不再悬浮折叠）。 */
+@Composable
+private fun ListTopBarRow(title: String, onBack: () -> Unit, trailing: (@Composable RowScope.() -> Unit)? = null) {
+    val colors = LocalShadeColors.current
+    Row(
+        Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Box(
+            Modifier.size(42.dp)
+                .shadePressable(cornerRadius = 21.dp, offset = 4.dp, blur = 6.dp, onClick = onBack),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.AutoMirrored.Filled.ArrowBack, "返回",
+                tint = colors.accent, modifier = Modifier.size(19.dp),
+            )
+        }
+        Text(
+            title, Modifier.weight(1f),
+            color = colors.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
+        trailing?.invoke(this)
+    }
+}
+
 /** 收藏的歌单列表（首页「更多」）。 */
 @Composable
 fun PlaylistsScreen(onBack: () -> Unit, onOpen: (PlaylistItem) -> Unit) {
@@ -495,14 +513,14 @@ fun PlaylistsScreen(onBack: () -> Unit, onOpen: (PlaylistItem) -> Unit) {
     var items by remember { mutableStateOf<List<PlaylistItem>?>(null) }
     LaunchedEffect(Unit) { items = runCatching { PlaylistApi.favPlaylists() }.getOrDefault(emptyList()) }
     Column(Modifier.fillMaxSize().background(colors.background)) {
-        DetailTopBar("收藏的歌单", onBack)
         val list = items ?: return@Column LoadingBox()
         if (list.isEmpty()) return@Column EmptyBox("还没有收藏的歌单")
         Box(Modifier.fillMaxSize()) {
             LazyColumn(
                 state = playlistsState,
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 132.dp),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 132.dp),
             ) {
+                item(key = "topbar") { ListTopBarRow("收藏的歌单", onBack) }
                 item {
                     TrackListBlock {
                         list.forEachIndexed { i, p ->
@@ -530,14 +548,14 @@ fun AlbumsScreen(onBack: () -> Unit, onOpen: (AlbumItem) -> Unit) {
     var items by remember { mutableStateOf<List<AlbumItem>?>(null) }
     LaunchedEffect(Unit) { items = runCatching { PlaylistApi.favAlbums() }.getOrDefault(emptyList()) }
     Column(Modifier.fillMaxSize().background(colors.background)) {
-        DetailTopBar("收藏的专辑", onBack)
         val list = items ?: return@Column LoadingBox()
         if (list.isEmpty()) return@Column EmptyBox("还没有收藏的专辑")
         Box(Modifier.fillMaxSize()) {
             LazyColumn(
                 state = albumsState,
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 132.dp),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 132.dp),
             ) {
+                item(key = "topbar") { ListTopBarRow("收藏的专辑", onBack) }
                 item {
                     TrackListBlock {
                         list.forEachIndexed { i, a ->

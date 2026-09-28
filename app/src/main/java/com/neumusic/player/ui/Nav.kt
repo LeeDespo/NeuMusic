@@ -33,28 +33,17 @@ sealed interface Nav {
 }
 
 /**
- * 容器变换动画的「母体」素材：二级页面从哪个卡片长出来。
- * [Image] 是卡片封面（歌单/专辑/电台），[Heart] 是「我喜欢」的无背景爱心。
- */
-sealed interface Hero {
-    data class Image(val url: String) : Hero
-    data object Heart : Hero
-}
-
-/**
- * 页面栈的一项。[origin] 是压栈来源卡片的屏幕坐标（容器变换动画的起点/终点），
- * [settled] 表示展开动画已完成——完成后页面回归普通渲染，返回时再做收缩动画。
+ * 页面栈的一项。[origin] 是压栈来源卡片的屏幕坐标（场景推拉动画的焦点），
+ * [settled] 表示进场动画已完成——完成后页面回归普通渲染，返回时再做回缩。
  */
 data class StackEntry(
     val nav: Nav,
     val origin: Rect? = null,
-    val hero: Hero? = null,
     val settled: Boolean = false,
 )
 
-/** 一次压栈请求：目的地 + 可选的来源卡片信息（有则播放容器变换动画）。 */
+/** 一次压栈请求：目的地 + 可选的来源卡片坐标（有则播放场景推拉转场）。 */
 data class NavRequest(
     val nav: Nav,
     val origin: Rect? = null,
-    val hero: Hero? = null,
 )
