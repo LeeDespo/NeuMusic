@@ -103,11 +103,10 @@ import kotlinx.coroutines.launch
  * 底下的页面闪现一下再重放升起动画——实测踩过）。
  *
  * 一二级页面切换是**整体场景缩放（摄像机推拉）**，操作对象是一级页面的根容器：
- * - 进入：整个一级场景（背景+列表+所有卡片）做 scale + translation——uniform 缩放
- *   放大、相机中心从屏幕中心滑向卡片中心（卡片只是焦点），卡片区域最终铺满屏幕；
- *   放大完成后二级页面才整屏淡入（末段 crossfade，无跳变）。
- * - 返回：同一条 tween(400, FastOutSlowInEasing) 精确倒放——二级页面先淡出，
- *   场景再回缩，露出原样的一级页面。
+ * - 进入：**只有**一级场景的根容器做 scale + translation——uniform 缩放、相机中心
+ *   从屏幕中心滑向卡片中心（卡片只是焦点），放大到卡片区域恰好铺满屏幕；
+ *   放大**完成后**二级页面才整屏淡入（1.06→1 回落），与放大末态 crossfade 无缝衔接。
+ * - 返回：同一条曲线精确倒放——二级页面**先**淡出，场景根容器**再**回缩到原位。
  * - **性能关键**：推拉进度只能被 graphicsLayer 的 lambda 读取（图层属性逐帧更新，
  *   不触发重组）；在组合期读 Animatable.value 会让 AppRoot 每帧整树重组（实测卡死）。
  *   真实页面内容推迟到 t>0.7 才组合，起播帧保持轻。
@@ -211,22 +210,32 @@ fun AppRoot() {
         stack[lastOriginIdx]
     } else null
 
-    // 推拉进度 0..1：按条目记忆（每个条目只播一次进场）；返回时从当前值倒放。
+    // 两段接力：**先**场景根容器推拉（0..1），**完成后**二级页面才整屏淡入（0..1）。
+    // 返回精确倒放：二级页先淡出，场景再回缩。进度只在图层 lambda 里读（零重组）。
     val zoomAnimatable = remember(morphEntry?.nav) {
+        Animatable(if (morphEntry?.settled == true) 1f else 0f)
+    }
+    val fadeAnimatable = remember(morphEntry?.nav) {
         Animatable(if (morphEntry?.settled == true) 1f else 0f)
     }
     LaunchedEffect(morphEntry?.nav, morphEntry?.settled == true, morphBack) {
         when {
             morphEntry == null -> Unit
             morphBack -> {
+                fadeAnimatable.animateTo(0f, tween(200, easing = FastOutSlowInEasing))
                 zoomAnimatable.animateTo(0f, tween(400, easing = FastOutSlowInEasing))
                 stack.remove(morphEntry)
                 morphBack = false
             }
-            morphEntry.settled -> zoomAnimatable.snapTo(1f)
+            morphEntry.settled -> {
+                zoomAnimatable.snapTo(1f)
+                fadeAnimatable.snapTo(1f)
+            }
             else -> {
                 zoomAnimatable.snapTo(0f)
+                fadeAnimatable.snapTo(0f)
                 zoomAnimatable.animateTo(1f, tween(400, easing = FastOutSlowInEasing))
+                fadeAnimatable.animateTo(1f, tween(220, easing = FastOutSlowInEasing))
                 val i = stack.indexOf(morphEntry)
                 if (i >= 0) stack[i] = morphEntry.copy(settled = true)
             }
@@ -313,6 +322,7 @@ fun AppRoot() {
             SecondPageOverlay(
                 entry = morphEntry,
                 progress = zoomAnimatable.asState(),
+                fade = fadeAnimatable.asState(),
                 onOpen = openCb,
                 onBack = backCb,
             )
@@ -423,6 +433,7 @@ private fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t
 private fun SecondPageOverlay(
     entry: StackEntry,
     progress: androidx.compose.runtime.State<Float>,
+    fade: androidx.compose.runtime.State<Float>,
     onOpen: (NavRequest) -> Unit,
     onBack: () -> Unit,
 ) {
@@ -439,7 +450,8 @@ private fun SecondPageOverlay(
             .background(colors.background)   // 必须盖到状态栏区域：否则淡入时透出放大的卡片封面（实测踩过）
             .statusBarsPadding()
             .graphicsLayer {
-                val a = ((progress.value - 0.75f) / 0.25f).coerceIn(0f, 1f)
+                // 淡入在**推拉完成之后**才开始（接力时序），带 1.06→1 回落
+                val a = fade.value.coerceIn(0f, 1f)
                 alpha = a
                 val sc = 1f + 0.06f * (1f - a)
                 scaleX = sc
