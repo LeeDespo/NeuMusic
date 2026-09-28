@@ -11,14 +11,13 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
@@ -35,25 +34,26 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -81,6 +81,8 @@ import com.neumusic.player.ui.settings.SettingsScreen
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * 页面栈根节点（无导航条）。
@@ -89,33 +91,55 @@ import androidx.compose.ui.draw.clip
  * 对任何进入方式都成立（同一页面可能有多个来源）。栈底是主页，栈只剩主页时
  * 把返回交还系统（退出 App）。
  *
- * 播放页是全屏覆盖层而非普通页面：它压在当前页面之上，`translationY` 由是否处于
- * 栈顶驱动；均衡器等页面则可以压在播放页之上，返回时播放页原样回来。
+ * 播放页是全屏覆盖层而非普通页面（zIndex 高于一切页面内容），`translationY` 由是否
+ * 处于栈顶驱动。均衡器压在播放页之上：**打开时播放页整体下滑露出音效页，返回时
+ * 播放页重新从底部升起盖住音效页，动画结束后才把音效页真正弹出栈**（早前立即弹栈，
+ * 底下的页面闪现一下再重放升起动画——实测踩过）。
  *
- * 带来源卡片的页面（主页卡片 → 二级页）播放**容器变换**动画：页面从卡片的位置和
- * 尺寸展开到全屏（卡片封面在容器里淡出、页面内容淡入），返回时反向收缩回卡片。
+ * 一二级页面切换是**整体场景缩放（摄像机推拉）**，不是单卡片形变：
+ * - 进入：整个一级场景（背景+列表+所有卡片）绕「卡片中心」整体放大，相机中心从
+ *   屏幕中心滑向卡片中心，卡片区域最终铺满整个屏幕；二级页面作为**整个根容器**
+ *   从卡片矩形长到全屏（内容随展开淡入，卡片封面随之淡出）。
+ * - 返回：同一条曲线精确倒放——二级页面整个根容器缩回卡片矩形，一级场景同步回缩，
+ *   露出原样的一级页面。
+ * - 实现上二级页面用 rect 插值（scaleX/scaleY + translation，origin 取左上角），
+ *   一级场景用 uniform 相机（scale + 平移），见 [ZoomPage] 与底层 graphicsLayer。
  */
 @Composable
 fun AppRoot() {
     val colors = LocalShadeColors.current
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     val stack = remember { mutableStateListOf(StackEntry(Nav.Home)) }
     var morphBack by remember { mutableStateOf(false) }
+    var playerRising by remember { mutableStateOf(false) }
+    var eqPopPending by remember { mutableStateOf(false) }
+    var sceneSize by remember { mutableStateOf(IntSize.Zero) }
 
     fun open(req: NavRequest) {
+        if (morphBack || eqPopPending) return   // 转场进行中不接新入口（快速连点防护）
         stack.add(StackEntry(req.nav, req.origin, req.hero))
     }
 
     // 弹出栈顶。栈底（主页）不弹——交还系统处理（退出 App）。
-    // 带来源卡片的页面先做收缩动画，动画结束再真正弹栈。
     fun back() {
-        if (stack.size <= 1) return
+        if (stack.size <= 1 || morphBack || eqPopPending) return
         val top = stack.last()
-        if (top.origin != null && !morphBack) {
-            if (top.settled) {
-                stack[stack.lastIndex] = top.copy(settled = false)
+        val below = stack.getOrNull(stack.lastIndex - 1)
+        if (top.nav == Nav.Equalizer && below?.nav == Nav.Player) {
+            // 音效页返回：先让播放页从底部升起盖住音效页，动画结束再真正弹栈。
+            eqPopPending = true
+            playerRising = true
+            scope.launch {
+                delay(360)   // ≈ slide 的 tween(320)
+                stack.removeAt(stack.lastIndex)
+                playerRising = false
+                eqPopPending = false
             }
-            morphBack = true
+            return
+        }
+        if (top.origin != null) {
+            morphBack = true   // 触发推拉倒放，动画结束由 LaunchedEffect 弹栈
             return
         }
         stack.removeAt(stack.lastIndex)
@@ -131,37 +155,78 @@ fun AppRoot() {
 
     val top = stack.last()
     val playerOpen = top.nav == Nav.Player
-    // 底层渲染哪个页面：播放页压顶时取最后一个非 Player；
-    // 该页面正在做容器变换（未落定）时渲染它**下面**的那层——变换覆盖层自己渲染它。
-    val lastNonPlayer = stack.lastOrNull { it.nav != Nav.Player }
-    val underEntry = when {
-        lastNonPlayer == null -> stack.first()
-        lastNonPlayer.origin != null && !lastNonPlayer.settled ->
-            stack.getOrNull(stack.indexOf(lastNonPlayer) - 1) ?: lastNonPlayer
-        else -> lastNonPlayer
-    }
-    // 容器变换覆盖层的宿主：栈顶那个带来源且未落定的条目（不含播放页）。
-    val morphEntry = stack.lastOrNull { it.nav != Nav.Player && it.origin != null && !it.settled }
-
     // 0 = 播放页完全在屏幕下方（隐藏）；1 = 完全覆盖。
-    val slide by animateFloatAsState(if (playerOpen) 1f else 0f, tween(320), label = "playerSlide")
+    val slide by animateFloatAsState(if (playerOpen || playerRising) 1f else 0f, tween(320), label = "playerSlide")
     val screenH = with(LocalDensity.current) { 900.dp.toPx() }
 
+    // 摄像机推拉的宿主：最顶上那个带来源的页面（其上最多只有播放页覆盖层，
+    // 否则播放页盖在它上面时推拉层会跟着显示）。
+    val lastOriginIdx = stack.indexOfLast { it.origin != null && it.nav != Nav.Player }
+    val morphEntry = if (lastOriginIdx >= 0 && stack.drop(lastOriginIdx + 1).all { it.nav == Nav.Player }) {
+        stack[lastOriginIdx]
+    } else null
+
+    // 推拉进度 0..1：按条目记忆（每个条目只播一次进场）；返回时从当前值倒放。
+    val zoomAnimatable = remember(morphEntry?.nav) {
+        Animatable(if (morphEntry?.settled == true) 1f else 0f)
+    }
+    LaunchedEffect(morphEntry?.nav, morphEntry?.settled == true, morphBack) {
+        when {
+            morphEntry == null -> Unit
+            morphBack -> {
+                zoomAnimatable.animateTo(0f, tween(400, easing = FastOutSlowInEasing))
+                stack.remove(morphEntry)
+                morphBack = false
+            }
+            morphEntry.settled -> zoomAnimatable.snapTo(1f)
+            else -> {
+                zoomAnimatable.snapTo(0f)
+                zoomAnimatable.animateTo(1f, tween(400, easing = FastOutSlowInEasing))
+                val i = stack.indexOf(morphEntry)
+                if (i >= 0) stack[i] = morphEntry.copy(settled = true)
+            }
+        }
+    }
+    val zoomT = zoomAnimatable.value
+    // t≈1（已落定）时底层按原样渲染——它被二级页面完全盖住，省掉整场景的放大绘制。
+    val zoomActive = morphEntry != null && zoomT < 0.999f
+    val underNav = when {
+        morphEntry != null -> stack.getOrNull(lastOriginIdx - 1)?.nav ?: Nav.Home
+        else -> (stack.lastOrNull { it.nav != Nav.Player } ?: stack.first()).nav
+    }
+
     Box(Modifier.fillMaxSize().background(colors.background)) {
-        // ── 底层：当前页面（切页做轻淡入淡出；容器变换的页面不在这一层渲染）──
-        Box(Modifier.fillMaxSize().statusBarsPadding()) {
-            AnimatedContent(
-                targetState = underEntry.nav,
-                transitionSpec = {
-                    (fadeIn(tween(200)) togetherWith fadeOut(tween(140)))
+        // ── 底层：整个一级场景。推拉时绕卡片中心整体放大/回缩（uniform 相机）──
+        Box(
+            Modifier
+                .fillMaxSize()
+                .onSizeChanged { sceneSize = it }
+                .graphicsLayer {
+                    val entry = morphEntry
+                    if (zoomActive && entry != null && sceneSize != IntSize.Zero) {
+                        val o = entry.origin ?: return@graphicsLayer
+                        val w = sceneSize.width.toFloat()
+                        val h = sceneSize.height.toFloat()
+                        val s = maxOf(w / o.width, h / o.height)   // 卡片区域恰好铺满屏幕
+                        val z = 1f + (s - 1f) * zoomT
+                        val cx = lerp(w / 2f, o.center.x, zoomT)   // 相机中心滑向卡片中心
+                        val cy = lerp(h / 2f, o.center.y, zoomT)
+                        transformOrigin = TransformOrigin(0f, 0f)
+                        scaleX = z
+                        scaleY = z
+                        translationX = w / 2f - cx * z
+                        translationY = h / 2f - cy * z
+                    }
                 },
-                label = "pageSwap",
-            ) { nav ->
-                PageContent(
-                    nav = nav,
-                    onOpen = ::open,
-                    onBack = ::back,
-                )
+        ) {
+            Box(Modifier.fillMaxSize().statusBarsPadding()) {
+                AnimatedContent(
+                    targetState = underNav,
+                    transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(140)) },
+                    label = "pageSwap",
+                ) { nav ->
+                    PageContent(nav = nav, onOpen = ::open, onBack = ::back)
+                }
             }
         }
 
@@ -172,6 +237,9 @@ fun AppRoot() {
                 onOpen = { if (stack.last().nav != Nav.Player) open(NavRequest(Nav.Player)) },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
+                    // 必须浮在推拉层(zIndex 3)之上——否则二级页面盖住播放栏（实测踩过）；
+                    // 仍低于播放页覆盖层(4)
+                    .zIndex(3.5f)
                     .graphicsLayer {
                         translationY = -screenH * 0.42f * slide
                         alpha = 1f - slide
@@ -181,28 +249,24 @@ fun AppRoot() {
             )
         }
 
-        // ── 容器变换覆盖层：页面从来源卡片展开/收缩 ──
-        morphEntry?.let { entry ->
-            MorphPage(
-                entry = entry,
-                reverse = morphBack,
-                onSettled = {
-                    val i = stack.indexOf(entry)
-                    if (i >= 0) stack[i] = entry.copy(settled = true)
-                },
-                onShrunk = {
-                    stack.remove(entry)
-                    morphBack = false
-                },
+        // ── 二级页面：整个根容器从卡片矩形长到全屏（推拉的另一端）──
+        if (morphEntry != null && sceneSize != IntSize.Zero) {
+            ZoomPage(
+                entry = morphEntry,
+                t = zoomT,
+                screenW = sceneSize.width.toFloat(),
+                screenH = sceneSize.height.toFloat(),
+                onOpen = ::open,
+                onBack = ::back,
             )
         }
 
-        // ── 播放页覆盖层：整块从下方上移 ──
+        // ── 播放页覆盖层：整块从下方上移（zIndex 高于推拉层）──
         if (slide > 0.001f) {
             Box(
                 Modifier
                     .fillMaxSize()
-                    .zIndex(2f)
+                    .zIndex(4f)
                     .graphicsLayer {
                         translationY = (1f - slide) * screenH
                         alpha = (slide * 1.6f).coerceAtMost(1f)
@@ -217,7 +281,7 @@ fun AppRoot() {
     }
 }
 
-/** 页面栈里普通页面的渲染（底层与容器变换覆盖层共用）。 */
+/** 页面栈里普通页面的渲染（底层与推拉层共用）。 */
 @Composable
 private fun PageContent(
     nav: Nav,
@@ -284,106 +348,102 @@ private fun PageContent(
 private fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t
 
 /**
- * 容器变换：页面从来源卡片 [StackEntry.origin] 展开到全屏。
+ * 推拉动画的二级页面端：整个页面根容器从来源卡片矩形插值到全屏。
  *
- * 实现：整屏 Box 用 `clipRect` 挖出「当前容器矩形」（卡片矩形 → 全屏插值），
- * 页面内容全尺寸铺在下面随进度淡入；容器矩形里先铺背景与卡片封面（Hero），
- * 封面随展开淡出——观感就是「卡片长大变成页面」。返回时同一条曲线倒放。
+ * rect 插值用 scaleX/scaleY + translation（origin 取左上角）实现——内容随容器
+ * 一起缩放（这就是「整个页面缩小成卡片大小/从卡片长开」），进场时真实内容随
+ * 展开淡入、卡片封面随之淡出；两端状态与卡片/全屏完全一致，进出可逆。
+ * 圆角补偿：clip 形状定义在未变换的本地坐标里，除以缩放后屏幕上才是真实圆角。
+ *
+ * 性能要点：真实页面内容**推迟到 t>0.15 才组合**——起播帧只组合外壳+封面（轻），
+ * 重活挪进飞行途中被运动掩盖；否则起播帧一次性组合整页会掉帧（实测"顿一顿"）。
+ * 封面 hero 按**卡片真实布局**起帧：上方内边距方形封面（非铺满矩形），
+ * 否则封面在起帧被拉伸变形（实测踩过）。
  */
 @Composable
-private fun MorphPage(
+private fun ZoomPage(
     entry: StackEntry,
-    reverse: Boolean,
-    onSettled: () -> Unit,
-    onShrunk: () -> Unit,
+    t: Float,
+    screenW: Float,
+    screenH: Float,
+    onOpen: (NavRequest) -> Unit,
+    onBack: () -> Unit,
 ) {
     val colors = LocalShadeColors.current
-    val origin = entry.origin ?: return
-    val progress = remember { Animatable(if (reverse) 1f else 0f) }
+    val o = entry.origin ?: return
+    val rectLeft = lerp(o.left, 0f, t)
+    val rectTop = lerp(o.top, 0f, t)
+    val rectW = lerp(o.width, screenW, t)
+    val rectH = lerp(o.height, screenH, t)
+    val scaleXC = (rectW / screenW).coerceAtLeast(0.0001f)
+    val scaleYC = (rectH / screenH).coerceAtLeast(0.0001f)
+    val cornerLocal = lerp(18f / scaleXC, 0f, t).coerceAtLeast(0f)
+    val contentAlpha = ((t - 0.25f) / 0.5f).coerceIn(0f, 1f)
+    val heroAlpha = 1f - ((t - 0.2f) / 0.55f).coerceIn(0f, 1f)
 
-    LaunchedEffect(reverse) {
-        if (!reverse) {
-            progress.animateTo(1f, tween(380, easing = FastOutSlowInEasing))
-            onSettled()
-        } else {
-            progress.animateTo(0f, tween(300, easing = FastOutSlowInEasing))
-            onShrunk()
+    val steady = t >= 0.999f
+    if (steady) {
+        Box(Modifier.fillMaxSize().zIndex(3f).background(colors.background)) {
+            PageContent(nav = entry.nav, onOpen = onOpen, onBack = onBack)
         }
+        return
     }
-
-    val t = progress.value
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val density = LocalDensity.current
-        val fullW = with(density) { maxWidth.toPx() }
-        val fullH = with(density) { maxHeight.toPx() }
-        val left = lerp(origin.left, 0f, t)
-        val top = lerp(origin.top, 0f, t)
-        val right = lerp(origin.right, fullW, t)
-        val bottom = lerp(origin.bottom, fullH, t)
-        val corner = lerp(18f, 0f, t)
-        val contentAlpha = ((t - 0.35f) / 0.5f).coerceIn(0f, 1f)
-        val heroAlpha = (1f - t * 1.8f).coerceIn(0f, 1f)
-
-        Box(
-            Modifier
-                .fillMaxSize()
-                .zIndex(3f)
-                .drawWithContent {
-                    // 容器矩形外不画：页面内容只在这个不断变大的「窗口」里可见
-                    clipRect(left = left, top = top, right = right, bottom = bottom) {
-                        this@drawWithContent.drawContent()
-                    }
-                },
-        ) {
-            // 卡片母体：背景圆角块 + 封面/爱心，展开过程里淡出
-            if (heroAlpha > 0f) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .zIndex(3f)
+            .graphicsLayer {
+                transformOrigin = TransformOrigin(0f, 0f)
+                scaleX = scaleXC
+                scaleY = scaleYC
+                translationX = rectLeft
+                translationY = rectTop
+            }
+            .clip(RoundedCornerShape(cornerLocal.dp))
+            .background(colors.background),
+    ) {
+        // 卡片母体（封面/爱心）先画，展开过程里淡出——t=0 时与卡片视觉一致：
+        // 上方内边距的方形封面 + 圆角，随展开放大到铺满，不是一上来就铺满整个矩形
+        if (heroAlpha > 0f) {
+            Column(
+                Modifier.fillMaxSize().graphicsLayer { alpha = heroAlpha },
+            ) {
+                val pad = 6f * (1f - t)
+                val coverCorner = (14f / scaleXC) * (1f - t)
                 Box(
                     Modifier
-                        .graphicsLayer {
-                            translationX = left
-                            translationY = top
-                            alpha = heroAlpha
-                        }
-                        .pxSize(density, right - left, bottom - top)
-                        .clip(RoundedCornerShape(with(density) { corner.toDp() }))
-                        .background(colors.background),
+                        .fillMaxWidth()
+                        .padding(horizontal = pad.dp, vertical = pad.dp)
+                        .aspectRatio(1f)
+                        .clip(RoundedCornerShape(coverCorner.coerceAtLeast(0f).dp)),
                     contentAlignment = Alignment.Center,
                 ) {
-                    val hero = entry.hero
-                    when (hero) {
+                    when (val hero = entry.hero) {
                         is Hero.Image -> AsyncImage(
                             model = hero.url,
                             contentDescription = null,
                             contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .pxSize(density, right - left - 12f, bottom - top - 12f)
-                                .clip(RoundedCornerShape(with(density) { (corner * 0.7f).toDp() })),
+                            modifier = Modifier.fillMaxSize(),
                         )
                         is Hero.Heart -> Icon(
                             Icons.Filled.Favorite,
                             contentDescription = null,
                             tint = colors.accent,
-                            modifier = Modifier.size(44.dp),
+                            modifier = Modifier.size((44f + 60f * t).dp),
                         )
                         null -> Unit
                     }
                 }
             }
-            // 页面内容：全尺寸铺放，随窗口展开淡入
-            Box(Modifier.graphicsLayer { alpha = contentAlpha }) {
-                PageContent(
-                    nav = entry.nav,
-                    onOpen = { },   // 变换进行中不响应二级跳转
-                    onBack = { },
-                )
+        }
+        // 真实页面内容：飞过起播帧后再组合（重活被运动掩盖），随展开淡入
+        if (t > 0.15f) {
+            Box(Modifier.fillMaxSize().graphicsLayer { alpha = contentAlpha }) {
+                PageContent(nav = entry.nav, onOpen = onOpen, onBack = onBack)
             }
         }
     }
 }
-
-/** 以像素设定子项尺寸（容器矩形跟随动画逐帧变化）。 */
-private fun Modifier.pxSize(density: androidx.compose.ui.unit.Density, wPx: Float, hPx: Float): Modifier =
-    this.requiredSize(with(density) { wPx.coerceAtLeast(0f).toDp() }, with(density) { hPx.coerceAtLeast(0f).toDp() })
 
 /** 底部播放栏：点封面/信息带出播放页。开启可视化时显示实时电平胶囊。 */
 @Composable

@@ -26,7 +26,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
@@ -171,7 +171,7 @@ fun PlayerScreen(onBack: () -> Unit, onOpenEqualizer: () -> Unit = {}) {
             Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            RoundIconButton(Icons.AutoMirrored.Filled.ArrowBack, "返回", 46.dp, onBack)
+            RoundIconButton(Icons.Filled.KeyboardArrowDown, "收起", 46.dp, onBack)
             Spacer(Modifier.weight(1f))
             RoundIconButton(Icons.Filled.Equalizer, "均衡器", 46.dp) { onOpenEqualizer() }
         }
