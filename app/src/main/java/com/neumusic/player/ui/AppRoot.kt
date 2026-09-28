@@ -124,6 +124,7 @@ fun AppRoot() {
         stack.add(StackEntry(req.nav, req.origin))
     }
 
+
     // 弹出栈顶。栈底（主页）不弹——交还系统处理（退出 App）。
     fun back() {
         if (stack.size <= 1 || morphBack || eqPopPending) return
@@ -148,10 +149,47 @@ fun AppRoot() {
         stack.removeAt(stack.lastIndex)
     }
 
+    // 记住回调实例：否则每次重组都是新函数对象，HomeScreen 等整页永远无法跳过重组
+    val openCb = remember { { req: NavRequest -> open(req) } }
+    val backCb = remember { { back() } }
+
     // 让 PlayerHost 能取链（播放器不直接依赖网络层）；自动切歌失败也弹给人看。
     LaunchedEffect(Unit) {
         PlayerHost.resolveUrl = { track -> loadUrl(track) }
         PlayerHost.onError = { msg -> toastMain(ctx, msg) }
+    }
+
+    // ── 预热（回答"能不能异步把界面渲染好"）——二级列表页第一次组合要加载类+JIT，
+    // 冷启动 140ms 左右全落在用户第一次点进列表的那一帧上。主页稳定后把它在
+    // 幕后（alpha≈0、被场景盖住、不可交互）组合并光栅一遍，成本摊进空闲期；
+    // 数据也在此时进了 TrackListCache。只此一次，之后卸载。
+    var warmupDone by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(2500)
+        warmupDone = true
+        delay(3500)
+        warmupDone = false
+    }
+    if (warmupDone && stack.size == 1) {
+        Box(Modifier.fillMaxSize().zIndex(-1f).graphicsLayer { alpha = 0.01f }) {
+            TrackListScreen(
+                title = "warmup",
+                onBack = {},
+                cacheKey = "__warmup__",
+                loadPage = { _, _ ->
+                    PlaylistApi.Page(
+                        songs = listOf(
+                            com.neumusic.player.data.Track(
+                                mid = "warmup", name = "warmup", mediaMid = "",
+                                singer = "", albumName = "", albumMid = "", intervalSec = 0,
+                                isVip = false,
+                            ),
+                        ),
+                        total = 1,
+                    )
+                },
+            )
+        }
     }
 
     androidx.activity.compose.BackHandler(enabled = stack.size > 1) { back() }
@@ -230,7 +268,7 @@ fun AppRoot() {
                     transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(140)) },
                     label = "pageSwap",
                 ) { nav ->
-                    PageContent(nav = nav, onOpen = ::open, onBack = ::back)
+                    PageContent(nav = nav, onOpen = openCb, onBack = backCb)
                 }
             }
         }
@@ -260,8 +298,8 @@ fun AppRoot() {
                 entry = morphEntry,
                 progress = zoomAnimatable.asState(),
                 steady = zoomSteady,
-                onOpen = ::open,
-                onBack = ::back,
+                onOpen = openCb,
+                onBack = backCb,
             )
         }
 
@@ -366,17 +404,18 @@ private fun SecondPageOverlay(
 ) {
     val colors = LocalShadeColors.current
     if (steady) {
-        Box(Modifier.fillMaxSize().zIndex(3f).background(colors.background)) {
+        Box(Modifier.fillMaxSize().zIndex(3f).background(colors.background).statusBarsPadding()) {
             PageContent(nav = entry.nav, onOpen = onOpen, onBack = onBack)
         }
         return
     }
-    val showContent by remember { derivedStateOf { progress.value > 0.7f } }
+    val showContent by remember { derivedStateOf { progress.value > 0.05f } }
     if (!showContent) return
     Box(
         Modifier
             .fillMaxSize()
             .zIndex(3f)
+            .statusBarsPadding()
             .graphicsLayer {
                 val a = ((progress.value - 0.75f) / 0.25f).coerceIn(0f, 1f)
                 alpha = a
