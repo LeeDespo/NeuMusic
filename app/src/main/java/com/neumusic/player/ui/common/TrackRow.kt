@@ -144,25 +144,32 @@ fun BlockRowSurface(
         Box(
             Modifier
                 .fillMaxWidth()
-                .clip(rounded)
+                .then(if (rounded == RectangleShape) Modifier else Modifier.clip(rounded))
                 .background(colors.background)
                 .drawBehind {
+                    // 骑缝软渐变：峰值在块边缘，向外向内各淡出一半（blurs 的等效近似）。
+                    // Middle 行不裁剪，允许画出界外；相邻行画的是同一条渐变，接缝无痕。
                     val w = strip.toPx()
-                    // 左缘受光（亮），右缘背光（暗）——与 drawShade 的双影方向一致
+                    val h = size.height
+                    fun edgeBrush(inner: Color, color: Color): Brush = Brush.horizontalGradient(
+                        0f to color.copy(alpha = 0f),
+                        0.5f to color.copy(alpha = 0.55f),
+                        1f to inner.copy(alpha = 0f),
+                    )
+                    val half = w / 2f
                     drawRect(
-                        brush = Brush.horizontalGradient(
-                            0f to colors.shadowLight.copy(alpha = 0.9f),
-                            1f to colors.shadowLight.copy(alpha = 0f),
-                        ),
-                        size = Size(w, size.height),
+                        brush = edgeBrush(colors.background, colors.shadowLight),
+                        topLeft = Offset(-half, 0f),
+                        size = Size(w, h),
                     )
                     drawRect(
                         brush = Brush.horizontalGradient(
                             0f to colors.shadowDark.copy(alpha = 0f),
-                            1f to colors.shadowDark.copy(alpha = 0.85f),
+                            0.5f to colors.shadowDark.copy(alpha = 0.55f),
+                            1f to colors.background.copy(alpha = 0f),
                         ),
-                        topLeft = Offset(size.width - w, 0f),
-                        size = Size(w, size.height),
+                        topLeft = Offset(size.width - half, 0f),
+                        size = Size(w, h),
                     )
                 },
         ) { content() }

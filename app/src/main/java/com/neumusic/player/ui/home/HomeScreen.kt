@@ -43,13 +43,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.neumusic.player.data.AlbumItem
-import com.neumusic.player.data.NicknameCache
 import com.neumusic.player.data.PlaylistItem
 import com.neumusic.player.data.Prefs
 import com.neumusic.player.data.api.ApiCache
 import com.neumusic.player.data.api.PlaylistApi
 import com.neumusic.player.data.api.RadioApi
-import com.neumusic.player.data.api.UserApi
 import com.neumusic.player.data.RadioGroup
 import com.neumusic.player.shade.LocalShadeColors
 import com.neumusic.player.shade.shadePressable
@@ -70,23 +68,18 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 
-/** 随机问候语（未登录时用，不带用户名）。 */
-private val GREETINGS_NO_NAME = listOf(
+/**
+ * 随机问候语池（顶栏空间有限，**不带用户名**——用户要求）。
+ * `greetingForHour` 按时段优先取贴切的，60% 概率时段语、40% 通用池，避免死板。
+ */
+val GREETINGS = listOf(
     "你好！", "早上好", "下午好", "晚上好", "夜深了，听首轻的？", "欢迎回来",
     "今天想听点什么？", "外面吵的话，戴耳机吧", "好久不见", "来点新歌？",
     "又是听歌的一天", "心情不好就多听两首", "午后的歌最安逸", "深夜电台已就绪",
     "要不要试试随机播放？", "歌单该更新了", "这里永远有歌等你",
 )
 
-/** 登录后问候语模板，{n} 替换为昵称。 */
-private val GREETINGS_WITH_NAME = listOf(
-    "你好！{n}", "早上好，{n}", "下午好，{n}", "晚上好，{n}", "欢迎回来，{n}",
-    "{n}，今天想听什么？", "又见面了，{n}", "{n}，来点新歌？", "夜深了，{n}",
-    "{n}，你的收藏还在等你", "戴上耳机吧，{n}", "{n}，随机一首怎么样？",
-    "好久不见，{n}", "{n}，今天也听歌了吗", "欢迎回来，{n}，歌单没变",
-)
-
-/** 按当前时段挑一条更贴切的问候语（未登录版）。 */
+/** 按当前时段挑一条问候语。 */
 private fun greetingForHour(hour: Int): String {
     val slot = when (hour) {
         in 5..8 -> listOf("早上好", "早上好，听点轻的？", "清晨第一首")
@@ -96,8 +89,7 @@ private fun greetingForHour(hour: Int): String {
         in 18..22 -> listOf("晚上好", "晚上好，放松一下")
         else -> listOf("夜深了，听首轻的？", "还没睡？陪你一会儿", "夜深了")
     }
-    // 时段内 60% 概率用时段的，其余用通用池，避免太死板。
-    return if ((0..9).random() < 6) slot.random() else GREETINGS_NO_NAME.random()
+    return if ((0..9).random() < 6) slot.random() else GREETINGS.random()
 }
 
 @Composable
@@ -158,22 +150,9 @@ fun HomeScreen(
                 .onFailure { radioLoaded = true }
         }
 
-        // ── 3) 问候语：立即用时段语；昵称命中缓存就用，否则回来再升级，不阻塞任何请求 ──
+        // ── 3) 问候语：不带用户名（顶栏放不下，用户要求），按时段随机 ──
         val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
         greeting = greetingForHour(hour)
-        if (logged) {
-            val nick = NicknameCache.get()
-            if (nick != null) {
-                greeting = GREETINGS_WITH_NAME.random().replace("{n}", nick)
-            } else {
-                scope.launch {
-                    UserApi.nickname()?.let { n ->
-                        NicknameCache.set(n)
-                        greeting = GREETINGS_WITH_NAME.random().replace("{n}", n)
-                    }
-                }
-            }
-        }
 
         // ── 4) 我喜欢全量刷新与数量（放最后，不跟三栏抢首批请求）──
         scope.launch { LikedStore.refresh() }

@@ -22,8 +22,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -93,6 +95,16 @@ data class ShadeColors(
 }
 
 val LocalShadeColors = staticCompositionLocalOf { ShadeColors.Light }
+
+/**
+ * 场景阴影的整体透明度（0..1），正常恒为 1。
+ *
+ * 一二级页面的推拉转场会把整个场景放大重绘——卡片阴影的高斯模糊每帧按放大倍率
+ * 重新执行，在模拟器上直接把帧时间拖到上百毫秒（实测）。转场期间由 AppRoot 把它
+ * 逐帧压到 0（阴影随推拉淡出/淡回），各 shade 修饰符在 drawBehind 里逐帧读取：
+ * 只触发重绘、不触发重组。**必须捕获 State 后在 draw lambda 里读 .floatValue**。
+ */
+val LocalShadeShadowAlpha = compositionLocalOf { mutableFloatStateOf(1f) }
 
 /**
  * 当前立体感强度。所有阴影绘制（凸起/凹陷）的位移与模糊都乘以这个系数，
@@ -216,9 +228,10 @@ private fun DrawScope.drawShade(
 fun Modifier.shadeSurface(cornerRadius: Dp = 20.dp, offset: Dp = 6.dp, blur: Dp = 10.dp): Modifier {
     val colors = LocalShadeColors.current
     val relief = LocalReliefScale.current
+    val shadowAlpha = LocalShadeShadowAlpha.current
     return this.drawBehind {
         drawShade(cornerRadius.toPx(), colors.background,
-            outerAlpha = 1f, innerAlpha = 0f, innerStrength = 1f,
+            outerAlpha = shadowAlpha.floatValue.coerceIn(0f, 1f), innerAlpha = 0f, innerStrength = 1f,
             colors = colors, offsetPx = offset.toPx() * relief, blurPx = blur.toPx() * relief)
     }
 }
@@ -228,9 +241,10 @@ fun Modifier.shadeSurface(cornerRadius: Dp = 20.dp, offset: Dp = 6.dp, blur: Dp 
 fun Modifier.shadeInset(cornerRadius: Dp = 16.dp, offset: Dp = 4.dp, blur: Dp = 6.dp): Modifier {
     val colors = LocalShadeColors.current
     val relief = LocalReliefScale.current
+    val shadowAlpha = LocalShadeShadowAlpha.current
     return this.drawBehind {
         drawShade(cornerRadius.toPx(), colors.background,
-            outerAlpha = 0f, innerAlpha = 1f, innerStrength = 1f,
+            outerAlpha = 0f, innerAlpha = shadowAlpha.floatValue.coerceIn(0f, 1f), innerStrength = 1f,
             colors = colors, offsetPx = offset.toPx() * relief, blurPx = blur.toPx() * relief)
     }
 }
@@ -268,14 +282,16 @@ fun Modifier.shadePressable(
 
     val outerAlpha = (1f - sink) * (1f - morph)
     val innerAlpha = maxOf(sink, morph)
+    val shadowAlpha = LocalShadeShadowAlpha.current
 
     return this
         .drawBehind {
+            val a = shadowAlpha.floatValue.coerceIn(0f, 1f)
             drawShade(
                 cornerPx = cornerRadius.toPx(),
                 bgColor = bg,
-                outerAlpha = outerAlpha,
-                innerAlpha = innerAlpha,
+                outerAlpha = outerAlpha * a,
+                innerAlpha = innerAlpha * a,
                 innerStrength = 1f + 0.45f * deep,
                 colors = colors,
                 offsetPx = offset.toPx() * relief,

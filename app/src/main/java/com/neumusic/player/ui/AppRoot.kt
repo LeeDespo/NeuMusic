@@ -29,14 +29,17 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
@@ -66,6 +69,7 @@ import com.neumusic.player.data.api.RadioApi
 import com.neumusic.player.player.PlayerHost
 import com.neumusic.player.player.VizHost
 import com.neumusic.player.shade.LocalShadeColors
+import com.neumusic.player.shade.LocalShadeShadowAlpha
 import com.neumusic.player.shade.flatPressable
 import com.neumusic.player.shade.shadeInset
 import com.neumusic.player.shade.shadeSurface
@@ -236,8 +240,19 @@ fun AppRoot() {
         else -> (stack.lastOrNull { it.nav != Nav.Player } ?: stack.first()).nav
     }
 
+    // 转场期间把场景阴影逐帧淡出（放大的高斯模糊逐帧重执行极其昂贵，实测帧 150ms+）
+    val flightShadow = remember { mutableFloatStateOf(1f) }
+    LaunchedEffect(morphEntry?.nav, morphBack, morphEntry?.settled == true) {
+        if (morphEntry == null) {
+            flightShadow.floatValue = 1f
+        } else {
+            snapshotFlow { zoomAnimatable.value }.collect { flightShadow.floatValue = 1f - it }
+        }
+    }
+
     Box(Modifier.fillMaxSize().background(colors.background)) {
         // ── 底层：整个一级场景。推拉时绕卡片中心整体放大/回缩（uniform 相机）──
+        CompositionLocalProvider(LocalShadeShadowAlpha provides flightShadow) {
         Box(
             Modifier
                 .fillMaxSize()
@@ -271,6 +286,7 @@ fun AppRoot() {
                     PageContent(nav = nav, onOpen = openCb, onBack = backCb)
                 }
             }
+        }
         }
 
         // ── 底部播放栏：随播放页展开而上移淡出，制造「被带出去」的连续感 ──
