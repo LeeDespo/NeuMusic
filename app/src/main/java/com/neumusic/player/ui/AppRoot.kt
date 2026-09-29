@@ -132,7 +132,6 @@ fun AppRoot() {
     var playerRising by remember { mutableStateOf(false) }
     var eqPopPending by remember { mutableStateOf(false) }
     var sceneSize by remember { mutableStateOf(IntSize.Zero) }
-    val lastLoggedT = remember { mutableFloatStateOf(-1f) }
 
     fun open(req: NavRequest) {
         if (morphBack || eqPopPending) return   // 转场进行中不接新入口（快速连点防护）
@@ -238,7 +237,7 @@ fun AppRoot() {
             morphEntry == null -> Unit
             morphBack -> {
                 pageAnimatable.animateTo(0f, tween(200, easing = LinearOutSlowInEasing))
-                zoomAnimatable.animateTo(0f, tween(450, easing = CubicBezierEasing(0.25f, 0f, 0.75f, 1f)))
+                zoomAnimatable.animateTo(0f, tween(400, easing = FastOutSlowInEasing))
                 stack.remove(morphEntry)
                 morphBack = false
             }
@@ -249,7 +248,7 @@ fun AppRoot() {
             else -> {
                 zoomAnimatable.snapTo(0f)
                 pageAnimatable.snapTo(0f)
-                zoomAnimatable.animateTo(1f, tween(450, easing = CubicBezierEasing(0.25f, 0f, 0.75f, 1f)))
+                zoomAnimatable.animateTo(1f, tween(400, easing = FastOutSlowInEasing))
                 delay(80)
                 pageAnimatable.animateTo(1f, tween(220, easing = LinearOutSlowInEasing))
                 val i = stack.indexOf(morphEntry)
@@ -290,10 +289,6 @@ fun AppRoot() {
                         val w = sceneSize.width.toFloat()
                         val h = sceneSize.height.toFloat()
                         val t = zoomAnimatable.value
-                        if (t - lastLoggedT.value > 0.2f || t >= 0.99f) {
-                            lastLoggedT.value = t
-                            android.util.Log.d("PerfDiag", "zoom t=${"%.2f".format(t)} s=${"%.2f".format(maxOf(w / o.width, h / o.height))} card=${o.width.toInt()}x${o.height.toInt()}@(${o.center.x.toInt()},${o.center.y.toInt()})")
-                        }
                         val s = maxOf(w / o.width, h / o.height)   // 卡片区域恰好铺满屏幕
                         val z = 1f + (s - 1f) * t
                         val cx = lerp(w / 2f, o.center.x, t)       // 相机中心滑向卡片中心
@@ -473,13 +468,15 @@ private fun SecondPageOverlay(
         Modifier
             .fillMaxSize()
             .zIndex(3f)
-            .background(colors.background)
             .statusBarsPadding()
             .graphicsLayer {
                 val a = page.value.coerceIn(0f, 1f)
                 alpha = a
                 translationY = (1f - a) * 12.dp.toPx()   // 上浮 12dp
-            },
+            }
+            // background 必须在 graphicsLayer **之后**：在图层内才受 alpha 控制，
+            // 否则从组合起就不透明地盖住场景，推拉全程不可见（实测踩过）
+            .background(colors.background),
     ) {
         PageContent(nav = entry.nav, onOpen = onOpen, onBack = onBack)
     }
