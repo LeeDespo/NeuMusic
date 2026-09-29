@@ -33,24 +33,12 @@ sealed interface Nav {
 }
 
 /**
- * 推拉动画的「母体」素材：二级页面的起帧与来源卡片**逐像素一致**。
- * [Image] 是卡片封面（歌单/专辑/电台），[Heart] 是「我喜欢」的无背景爱心；
- * [title]/[subtitle] 用于起帧复刻卡片文字（封面下方那两行）。
- */
-sealed interface Hero {
-    val subtitle: String?
-    data class Image(val url: String, val title: String, override val subtitle: String? = null) : Hero
-    data class Heart(val title: String, override val subtitle: String? = null) : Hero
-}
-
-/**
  * 页面栈的一项。[origin] 是压栈来源卡片的屏幕坐标（场景推拉动画的焦点），
  * [settled] 表示进场动画已完成——完成后页面回归普通渲染，返回时再做回缩。
  */
 data class StackEntry(
     val nav: Nav,
     val origin: Rect? = null,
-    val hero: Hero? = null,
     val settled: Boolean = false,
 )
 
@@ -58,5 +46,4 @@ data class StackEntry(
 data class NavRequest(
     val nav: Nav,
     val origin: Rect? = null,
-    val hero: Hero? = null,
 )
