@@ -298,8 +298,8 @@ fun AppRoot() {
                         scaleY = z
                         translationX = w / 2f - cx * z
                         translationY = h / 2f - cy * z
-                        // TEMP-DIAG（用户要求暂关模糊以检查推拉动画）：恢复时改回 true
-                        val blurEnabled = false
+                        // 模糊随推拉逐步增强，铺满屏幕时完全模糊（用户规格）
+                        val blurEnabled = true
                         if (blurEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && t > 0.01f) {
                             val b = 26f * t
                             renderEffect = android.graphics.RenderEffect
