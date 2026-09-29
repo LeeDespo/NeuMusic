@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -131,6 +132,7 @@ fun AppRoot() {
     var playerRising by remember { mutableStateOf(false) }
     var eqPopPending by remember { mutableStateOf(false) }
     var sceneSize by remember { mutableStateOf(IntSize.Zero) }
+    val lastLoggedT = remember { mutableFloatStateOf(-1f) }
 
     fun open(req: NavRequest) {
         if (morphBack || eqPopPending) return   // 转场进行中不接新入口（快速连点防护）
@@ -236,7 +238,7 @@ fun AppRoot() {
             morphEntry == null -> Unit
             morphBack -> {
                 pageAnimatable.animateTo(0f, tween(200, easing = LinearOutSlowInEasing))
-                zoomAnimatable.animateTo(0f, tween(400, easing = FastOutSlowInEasing))
+                zoomAnimatable.animateTo(0f, tween(450, easing = CubicBezierEasing(0.25f, 0f, 0.75f, 1f)))
                 stack.remove(morphEntry)
                 morphBack = false
             }
@@ -247,7 +249,7 @@ fun AppRoot() {
             else -> {
                 zoomAnimatable.snapTo(0f)
                 pageAnimatable.snapTo(0f)
-                zoomAnimatable.animateTo(1f, tween(400, easing = FastOutSlowInEasing))
+                zoomAnimatable.animateTo(1f, tween(450, easing = CubicBezierEasing(0.25f, 0f, 0.75f, 1f)))
                 delay(80)
                 pageAnimatable.animateTo(1f, tween(220, easing = LinearOutSlowInEasing))
                 val i = stack.indexOf(morphEntry)
@@ -288,6 +290,10 @@ fun AppRoot() {
                         val w = sceneSize.width.toFloat()
                         val h = sceneSize.height.toFloat()
                         val t = zoomAnimatable.value
+                        if (t - lastLoggedT.value > 0.2f || t >= 0.99f) {
+                            lastLoggedT.value = t
+                            android.util.Log.d("PerfDiag", "zoom t=${"%.2f".format(t)} s=${"%.2f".format(maxOf(w / o.width, h / o.height))} card=${o.width.toInt()}x${o.height.toInt()}@(${o.center.x.toInt()},${o.center.y.toInt()})")
+                        }
                         val s = maxOf(w / o.width, h / o.height)   // 卡片区域恰好铺满屏幕
                         val z = 1f + (s - 1f) * t
                         val cx = lerp(w / 2f, o.center.x, t)       // 相机中心滑向卡片中心
@@ -297,8 +303,9 @@ fun AppRoot() {
                         scaleY = z
                         translationX = w / 2f - cx * z
                         translationY = h / 2f - cy * z
-                        // 模糊随推拉逐步增强，铺满屏幕时完全模糊（用户规格）
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && t > 0.01f) {
+                        // TEMP-DIAG（用户要求暂关模糊以检查推拉动画）：恢复时改回 true
+                        val blurEnabled = false
+                        if (blurEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && t > 0.01f) {
                             val b = 26f * t
                             renderEffect = android.graphics.RenderEffect
                                 .createBlurEffect(b, b, android.graphics.Shader.TileMode.CLAMP)
