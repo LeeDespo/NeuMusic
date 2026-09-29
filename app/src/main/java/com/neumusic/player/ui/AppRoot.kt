@@ -124,7 +124,7 @@ fun AppRoot() {
 
     fun open(req: NavRequest) {
         if (morphBack || eqPopPending) return   // 转场进行中不接新入口（快速连点防护）
-        stack.add(StackEntry(req.nav, req.origin))
+        stack.add(StackEntry(req.nav, req.origin, req.hero))
     }
 
 
@@ -210,32 +210,24 @@ fun AppRoot() {
         stack[lastOriginIdx]
     } else null
 
-    // 两段接力：**先**场景根容器推拉（0..1），**完成后**二级页面才整屏淡入（0..1）。
-    // 返回精确倒放：二级页先淡出，场景再回缩。进度只在图层 lambda 里读（零重组）。
+    // 单一时间轴 t 0..1：场景根容器推拉 + 二级页面根容器从卡片矩形长到全屏，
+    // 同一条曲线**同时**完成（用户规格：返回时二级页"同时"缩回卡片矩形）。
+    // 返回精确倒放。进度只在图层 lambda 里读（零重组）。
     val zoomAnimatable = remember(morphEntry?.nav) {
-        Animatable(if (morphEntry?.settled == true) 1f else 0f)
-    }
-    val fadeAnimatable = remember(morphEntry?.nav) {
         Animatable(if (morphEntry?.settled == true) 1f else 0f)
     }
     LaunchedEffect(morphEntry?.nav, morphEntry?.settled == true, morphBack) {
         when {
             morphEntry == null -> Unit
             morphBack -> {
-                fadeAnimatable.animateTo(0f, tween(200, easing = FastOutSlowInEasing))
-                zoomAnimatable.animateTo(0f, tween(400, easing = FastOutSlowInEasing))
+                zoomAnimatable.animateTo(0f, tween(420, easing = FastOutSlowInEasing))
                 stack.remove(morphEntry)
                 morphBack = false
             }
-            morphEntry.settled -> {
-                zoomAnimatable.snapTo(1f)
-                fadeAnimatable.snapTo(1f)
-            }
+            morphEntry.settled -> zoomAnimatable.snapTo(1f)
             else -> {
                 zoomAnimatable.snapTo(0f)
-                fadeAnimatable.snapTo(0f)
-                zoomAnimatable.animateTo(1f, tween(400, easing = FastOutSlowInEasing))
-                fadeAnimatable.animateTo(1f, tween(220, easing = FastOutSlowInEasing))
+                zoomAnimatable.animateTo(1f, tween(420, easing = FastOutSlowInEasing))
                 val i = stack.indexOf(morphEntry)
                 if (i >= 0) stack[i] = morphEntry.copy(settled = true)
             }
@@ -319,10 +311,11 @@ fun AppRoot() {
 
         // ── 二级页面：放大完成后整屏淡入（推拉的最后一站）──
         if (morphEntry != null) {
-            SecondPageOverlay(
+            if (sceneSize != IntSize.Zero) SecondPageOverlay(
                 entry = morphEntry,
                 progress = zoomAnimatable.asState(),
-                fade = fadeAnimatable.asState(),
+                screenW = sceneSize.width.toFloat(),
+                screenH = sceneSize.height.toFloat(),
                 onOpen = openCb,
                 onBack = backCb,
             )
@@ -425,40 +418,95 @@ private fun PageContent(
 private fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t
 
 /**
- * 推拉的二级页面端：**不做容器动画**——场景缩放才是主角，二级页面整屏待命，
- * 在推拉的最后四分之一淡入（带一点 1.06→1 的回落），与放大末态 crossfade 无缝衔接。
- * 进度只从图层 lambda 里读（零重组）；落定后按普通页面渲染。
+ * 推拉的二级页面端：**整个页面根容器**从来源卡片矩形插值到全屏
+ * （rect 插值：scaleX/scaleY + translation，origin 取左上角——与场景推拉同一条
+ * 曲线同时完成；返回时整页缩回卡片矩形，用户规格）。
+ * - 内容随展开淡入、卡片封面（按卡片真实布局起帧：上方内边距方形封面+圆角，
+ *   起帧与真实卡片一致不跳变）随之淡出；
+ * - 圆角补偿：clip 形状在本地坐标里，除以缩放后屏幕上才是真实圆角；
+ * - 所有逐帧值都在图层 lambda 里读（零重组）；单一实例贯穿飞行与落定。
  */
 @Composable
 private fun SecondPageOverlay(
     entry: StackEntry,
     progress: androidx.compose.runtime.State<Float>,
-    fade: androidx.compose.runtime.State<Float>,
+    screenW: Float,
+    screenH: Float,
     onOpen: (NavRequest) -> Unit,
     onBack: () -> Unit,
 ) {
     val colors = LocalShadeColors.current
-    // **单一实例**：飞行段与落定态共用同一个 PageContent 子树（只靠图层 alpha 差异）。
-    // 早期版本按 steady 切换两个分支——落定瞬间飞行实例被销毁，列表的加载协程随
-    // rememberCoroutineScope 一起取消，新实例从头再拉，表现为列表偶发空白（实测踩过）。
-    val showContent by remember { derivedStateOf { progress.value > 0.05f } }
-    if (!showContent) return
+    val o = entry.origin ?: return
     Box(
         Modifier
             .fillMaxSize()
             .zIndex(3f)
-            .background(colors.background)   // 必须盖到状态栏区域：否则淡入时透出放大的卡片封面（实测踩过）
-            .statusBarsPadding()
             .graphicsLayer {
-                // 淡入在**推拉完成之后**才开始（接力时序），带 1.06→1 回落
-                val a = fade.value.coerceIn(0f, 1f)
-                alpha = a
-                val sc = 1f + 0.06f * (1f - a)
-                scaleX = sc
-                scaleY = sc
-            },
+                val t = progress.value.coerceIn(0f, 1f)
+                val rectLeft = lerp(o.left, 0f, t)
+                val rectTop = lerp(o.top, 0f, t)
+                val rectW = lerp(o.width, screenW, t)
+                val rectH = lerp(o.height, screenH, t)
+                val sx = (rectW / screenW).coerceAtLeast(0.0001f)
+                val sy = (rectH / screenH).coerceAtLeast(0.0001f)
+                transformOrigin = TransformOrigin(0f, 0f)
+                scaleX = sx
+                scaleY = sy
+                translationX = rectLeft
+                translationY = rectTop
+                // 圆角补偿：形状定义在本地坐标，除以缩放后屏幕上才是真实圆角
+                val localCorner = (lerp(18f, 0f, t) / sy.coerceAtLeast(0.001f)).coerceAtLeast(0f)
+                shape = RoundedCornerShape(localCorner.dp)
+                clip = true
+            }
+            // 安全区在本地坐标里补：t=1（全屏）时正好让顶栏落在状态栏之下；
+            // 飞行中该内缩随矩形一起缩放，不影响卡片起帧
+            .statusBarsPadding()
+            .background(colors.background),
     ) {
-        PageContent(nav = entry.nav, onOpen = onOpen, onBack = onBack)
+        // 卡片母体：t=0 时与真实卡片视觉一致，展开过程里淡出
+        val heroAlpha = 1f - ((progress.value - 0.25f) / 0.5f).coerceIn(0f, 1f)
+        if (heroAlpha > 0f) {
+            Column(Modifier.fillMaxSize().graphicsLayer { alpha = heroAlpha }) {
+                val t = progress.value.coerceIn(0f, 1f)
+                val sy = lerp(o.height, screenH, t) / screenH
+                val pad = 6f * (1f - t)
+                val coverCorner = ((14f * (1f - t)) / sy.coerceAtLeast(0.001f)).coerceAtLeast(0f)
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = pad.dp, vertical = pad.dp)
+                        .aspectRatio(1f)
+                        .graphicsLayer {
+                            shape = RoundedCornerShape(coverCorner.dp)
+                            clip = true
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    when (val hero = entry.hero) {
+                        is Hero.Image -> AsyncImage(
+                            model = hero.url,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                        is Hero.Heart -> Icon(
+                            Icons.Filled.Favorite,
+                            contentDescription = null,
+                            tint = colors.accent,
+                            modifier = Modifier.size(44.dp),
+                        )
+                        null -> Unit
+                    }
+                }
+            }
+        }
+        // 真实页面内容：t>0.05 组合（冷成本落在推拉起步），随展开淡入
+        if (progress.value > 0.05f) {
+            Box(Modifier.fillMaxSize().graphicsLayer { alpha = ((progress.value - 0.3f) / 0.5f).coerceIn(0f, 1f) }) {
+                PageContent(nav = entry.nav, onOpen = onOpen, onBack = onBack)
+            }
+        }
     }
 }
 
