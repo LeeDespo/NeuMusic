@@ -188,12 +188,15 @@ fun HomeScreen(
                 HomeCardRow {
                     // 「我喜欢」固定排第一（用户要求），再跟收藏的歌单。
                     item {
-                        LikedCard(likedCount) { b -> onOpenDest(NavRequest(Nav.Liked, b, Hero.Heart)) }
+                        LikedCard(likedCount) { b -> onOpenDest(NavRequest(Nav.Liked, b, Hero.Heart("我喜欢", likedCount?.let { "$it 首" }))) }
                     }
                     items(playlists) { p ->
                         PlaylistCard(p) { b ->
-                            val hero = if (p.name == "我喜欢" || p.tid == 201L) Hero.Heart
-                            else if (p.logo.isNotEmpty()) Hero.Image(p.logo) else null
+                            val hero = when {
+                                p.name == "我喜欢" || p.tid == 201L -> Hero.Heart(p.name, "${p.songnum} 首")
+                                p.logo.isNotEmpty() -> Hero.Image(p.logo, p.name, "${p.songnum} 首")
+                                else -> null
+                            }
                             onOpenDest(NavRequest(Nav.PlaylistDetail(p.tid, p.name, p.songnum), b, hero))
                         }
                     }
@@ -215,7 +218,7 @@ fun HomeScreen(
                 HomeCardRow {
                     items(albums) { a ->
                         AlbumCard(a) { b ->
-                            val hero = if (a.logo.isNotEmpty()) Hero.Image(a.logo) else null
+                            val hero = if (a.logo.isNotEmpty()) Hero.Image(a.logo, a.name, "${a.songnum} 首") else null
                             onOpenDest(NavRequest(Nav.AlbumDetail(a.mid, a.name, a.songnum), b, hero))
                         }
                     }
@@ -239,7 +242,7 @@ fun HomeScreen(
                     HomeCardRow(spacing = 12.dp) {
                         items(g.stations) { s ->
                             StationCard(s.title, s.picUrl) { b ->
-                                onOpenDest(NavRequest(Nav.RadioDetail(s.id, s.title), b, Hero.Image(s.picUrl)))
+                                onOpenDest(NavRequest(Nav.RadioDetail(s.id, s.title), b, Hero.Image(s.picUrl, s.title)))
                             }
                         }
                     }

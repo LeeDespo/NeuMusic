@@ -33,12 +33,14 @@ sealed interface Nav {
 }
 
 /**
- * 推拉动画的「母体」素材：二级页面的起帧与来源卡片一致。
- * [Image] 是卡片封面（歌单/专辑/电台），[Heart] 是「我喜欢」的无背景爱心。
+ * 推拉动画的「母体」素材：二级页面的起帧与来源卡片**逐像素一致**。
+ * [Image] 是卡片封面（歌单/专辑/电台），[Heart] 是「我喜欢」的无背景爱心；
+ * [title]/[subtitle] 用于起帧复刻卡片文字（封面下方那两行）。
  */
 sealed interface Hero {
-    data class Image(val url: String) : Hero
-    data object Heart : Hero
+    val subtitle: String?
+    data class Image(val url: String, val title: String, override val subtitle: String? = null) : Hero
+    data class Heart(val title: String, override val subtitle: String? = null) : Hero
 }
 
 /**

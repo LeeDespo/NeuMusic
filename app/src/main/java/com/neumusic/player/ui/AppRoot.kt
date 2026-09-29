@@ -19,6 +19,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.ui.text.style.TextAlign
+import kotlin.math.roundToInt
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
@@ -418,13 +425,15 @@ private fun PageContent(
 private fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t
 
 /**
- * 推拉的二级页面端：**整个页面根容器**从来源卡片矩形插值到全屏
- * （rect 插值：scaleX/scaleY + translation，origin 取左上角——与场景推拉同一条
- * 曲线同时完成；返回时整页缩回卡片矩形，用户规格）。
- * - 内容随展开淡入、卡片封面（按卡片真实布局起帧：上方内边距方形封面+圆角，
- *   起帧与真实卡片一致不跳变）随之淡出；
- * - 圆角补偿：clip 形状在本地坐标里，除以缩放后屏幕上才是真实圆角；
- * - 所有逐帧值都在图层 lambda 里读（零重组）；单一实例贯穿飞行与落定。
+ * 推拉的二级页面端，三层配合：
+ * 1. **仿射页面容器**：整个根容器从卡片矩形 rect 插值到全屏（scaleX/scaleY +
+ *    translation，origin 左上角），与场景推拉同一条曲线同时完成；内容随展开淡入；
+ * 2. **起帧复刻层**（未变换，屏幕坐标）：卡片文字复刻品，t=0 与真实卡片逐像素一致
+ *    （仿射容器的横竖缩放比不同，满屏布局画卡片必然压扁——封面/文字必须离开仿射层）；
+ *    t 0→0.3 淡出；
+ * 3. **封面缩放层**（未变换）：封面方块从卡片上的位置独立放大（graphicsLayer 缩放，
+ *    不重排版），t 0.15→0.5 淡出——封面起帧无变形、飞行中段有"封面长大"的观感。
+ * 圆角补偿/状态栏安全区/单一实例同前。
  */
 @Composable
 private fun SecondPageOverlay(
@@ -436,7 +445,11 @@ private fun SecondPageOverlay(
     onBack: () -> Unit,
 ) {
     val colors = LocalShadeColors.current
+    val density = LocalDensity.current
     val o = entry.origin ?: return
+    val hero = entry.hero
+
+    // ── 1) 仿射页面容器 ──
     Box(
         Modifier
             .fillMaxSize()
@@ -454,57 +467,102 @@ private fun SecondPageOverlay(
                 scaleY = sy
                 translationX = rectLeft
                 translationY = rectTop
-                // 圆角补偿：形状定义在本地坐标，除以缩放后屏幕上才是真实圆角
                 val localCorner = (lerp(18f, 0f, t) / sy.coerceAtLeast(0.001f)).coerceAtLeast(0f)
                 shape = RoundedCornerShape(localCorner.dp)
                 clip = true
             }
-            // 安全区在本地坐标里补：t=1（全屏）时正好让顶栏落在状态栏之下；
-            // 飞行中该内缩随矩形一起缩放，不影响卡片起帧
+            // 安全区在本地坐标里补：t=1 时顶栏落在状态栏之下
             .statusBarsPadding()
             .background(colors.background),
     ) {
-        // 卡片母体：t=0 时与真实卡片视觉一致，展开过程里淡出
-        val heroAlpha = 1f - ((progress.value - 0.25f) / 0.5f).coerceIn(0f, 1f)
-        if (heroAlpha > 0f) {
-            Column(Modifier.fillMaxSize().graphicsLayer { alpha = heroAlpha }) {
-                val t = progress.value.coerceIn(0f, 1f)
-                val sy = lerp(o.height, screenH, t) / screenH
-                val pad = 6f * (1f - t)
-                val coverCorner = ((14f * (1f - t)) / sy.coerceAtLeast(0.001f)).coerceAtLeast(0f)
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = pad.dp, vertical = pad.dp)
-                        .aspectRatio(1f)
-                        .graphicsLayer {
-                            shape = RoundedCornerShape(coverCorner.dp)
-                            clip = true
-                        },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    when (val hero = entry.hero) {
-                        is Hero.Image -> AsyncImage(
-                            model = hero.url,
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                        is Hero.Heart -> Icon(
-                            Icons.Filled.Favorite,
-                            contentDescription = null,
-                            tint = colors.accent,
-                            modifier = Modifier.size(44.dp),
-                        )
-                        null -> Unit
-                    }
-                }
-            }
-        }
-        // 真实页面内容：t>0.05 组合（冷成本落在推拉起步），随展开淡入
         if (progress.value > 0.05f) {
             Box(Modifier.fillMaxSize().graphicsLayer { alpha = ((progress.value - 0.3f) / 0.5f).coerceIn(0f, 1f) }) {
                 PageContent(nav = entry.nav, onOpen = onOpen, onBack = onBack)
+            }
+        }
+    }
+
+    // ── 2) 起帧复刻层 + 3) 封面缩放层（只在飞行早期存在；未变换，屏幕坐标）──
+    val t0 = progress.value.coerceIn(0f, 1f)
+    if (t0 < 0.55f && hero != null) {
+        val cardWdp = with(density) { o.width.toDp() }
+        val coverPx = with(density) { 92.dp.toPx() }
+        val padPx = with(density) { 6.dp.toPx() }
+        val coverLeft = o.left + padPx
+        val coverTop = o.top + padPx
+
+        // 3) 封面缩放层：从卡片上的封面方块放大，t 0.15→0.5 淡出
+        if (t0 > 0.1f) {
+            val coverAlpha = 1f - ((t0 - 0.15f) / 0.35f).coerceIn(0f, 1f)
+            Box(
+                Modifier
+                    .absoluteOffset { IntOffset(coverLeft.roundToInt(), coverTop.roundToInt()) }
+                    .size(92.dp)
+                    .zIndex(3.2f)
+                    .graphicsLayer {
+                        val te = (t0 / 0.5f).coerceIn(0f, 1f)
+                        transformOrigin = TransformOrigin(0f, 0f)
+                        scaleX = lerp(1f, screenW / coverPx, te)
+                        scaleY = lerp(1f, screenH / coverPx, te)
+                        translationX = lerp(0f, -coverLeft, te)
+                        translationY = lerp(0f, -coverTop, te)
+                        alpha = coverAlpha
+                    }
+                    .clip(RoundedCornerShape((14f * (1f - t0 * 1.6f)).coerceAtLeast(0f).dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                when (hero) {
+                    is Hero.Image -> AsyncImage(
+                        model = hero.url,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    is Hero.Heart -> Icon(
+                        Icons.Filled.Favorite,
+                        contentDescription = null,
+                        tint = colors.accent,
+                        modifier = Modifier.size(44.dp),
+                    )
+                }
+            }
+        }
+
+        // 2) 复刻层：卡片底色 + 文字（封面位留给上面的缩放层），t 0→0.3 淡出
+        val replicaAlpha = 1f - (t0 / 0.3f).coerceIn(0f, 1f)
+        if (replicaAlpha > 0f) {
+            Column(
+                Modifier
+                    .absoluteOffset { IntOffset(o.left.roundToInt(), o.top.roundToInt()) }
+                    .width(cardWdp)
+                    .zIndex(3.1f)
+                    .graphicsLayer { alpha = replicaAlpha }
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(colors.background)
+                    .padding(6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Spacer(Modifier.height(92.dp))   // 封面位（由缩放层绘制）
+                Spacer(Modifier.height(6.dp))
+                when (hero) {
+                    is Hero.Image -> Text(
+                        hero.title, color = colors.textPrimary, fontSize = 12.sp,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    is Hero.Heart -> Text(
+                        hero.title, color = colors.textPrimary, fontSize = 12.sp,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                hero.subtitle?.let { sub ->
+                    Text(
+                        sub, color = colors.textTertiary, fontSize = 10.sp,
+                        maxLines = 1, textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
         }
     }
