@@ -98,6 +98,7 @@ import com.neumusic.player.ui.settings.SettingsScreen
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -264,13 +265,20 @@ fun AppRoot() {
         else -> (stack.lastOrNull { it.nav != Nav.Player } ?: stack.first()).nav
     }
 
-    // 转场期间把场景阴影逐帧淡出（放大的高斯模糊逐帧重执行极其昂贵，实测帧 150ms+）
+    // 转场期间把场景阴影逐帧淡出（放大的高斯模糊逐帧重执行极其昂贵，实测帧 150ms+）；
+    // 同时把背景色遮罩逐帧加浓（用户规格）：场景在推拉中逐渐"沉入"页面底色，
+    // 二级页面的淡入上浮就是在同色底上浮现，衔接无缝。深浅色模式取各自 background。
     val flightShadow = remember { mutableFloatStateOf(1f) }
+    val flightScrim = remember { mutableFloatStateOf(0f) }
     LaunchedEffect(morphEntry?.nav, morphBack, morphEntry?.settled == true) {
         if (morphEntry == null) {
             flightShadow.floatValue = 1f
+            flightScrim.floatValue = 0f
         } else {
-            snapshotFlow { zoomAnimatable.value }.collect { flightShadow.floatValue = 1f - it }
+            snapshotFlow { zoomAnimatable.value }.collect {
+                flightShadow.floatValue = 1f - it
+                flightScrim.floatValue = it
+            }
         }
     }
 
@@ -342,6 +350,20 @@ fun AppRoot() {
 
         // ── 二级页面：放大完成后整屏淡入（推拉的最后一站）──
         if (morphEntry != null) {
+        // ── 背景色遮罩：随推拉加浓（drawBehind 逐帧读，零重组），沉入页面底色 ──
+        if (morphEntry != null) {
+            val scrim = flightScrim
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .zIndex(2.5f)
+                    .drawBehind {
+                        val a = scrim.floatValue.coerceIn(0f, 1f)
+                        if (a > 0.001f) drawRect(colors.background, alpha = a)
+                    },
+            )
+        }
+
             SecondPageOverlay(
                 entry = morphEntry,
                 page = pageAnimatable.asState(),
