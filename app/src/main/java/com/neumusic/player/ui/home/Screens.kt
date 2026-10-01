@@ -144,6 +144,7 @@ fun TrackListScreen(
     /** 「更多 → 查看专辑」的跳转回调。 */
     onOpenAlbum: (Track) -> Unit = {},
 ) {
+    val barSpace = rememberPlayerBarSpace()
     val colors = LocalShadeColors.current
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -323,8 +324,8 @@ fun TrackListScreen(
             contentPadding = PaddingValues(
                 start = 16.dp, end = 16.dp,
                 top = 0.dp,   // 状态栏内缩由顶栏（ListTopBarRow）自己负责，这里不再叠加
-                // 底部留白：让最后一行能滚到播放栏之上，而不是被压住。
-                bottom = 150.dp,
+                // 底部留白：按播放栏实测高度（可视化模式面板更高），最后一行才不会被压住。
+                bottom = barSpace,
             ),
         ) {
             // 顶栏和主页一样是页面的一部分：往上滑就跟着滚走，不再悬浮折叠

@@ -38,6 +38,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -131,19 +133,55 @@ fun SearchScreen(
     var infoTrack by remember { mutableStateOf<Track?>(null) }
     var formatTrack by remember { mutableStateOf<Track?>(null) }
 
+    // ── 分页（用户 2026-10-01：搜索结果原来有上限，滚到底不会继续加载）──
+    val pageByTab = remember { mutableStateMapOf<SearchTab, Int>() }
+    val exhausted = remember { mutableStateMapOf<SearchTab, Boolean>() }
+    var appending by remember { mutableStateOf(false) }
+
+    /** 取某标签的第 p 页并**追加**（p=1 时重置）。返回本页条数。 */
+    suspend fun loadPage(t: SearchTab, q: String, p: Int): Int = when (t) {
+        SearchTab.SONGS -> SearchApi.songs(q, page = p).also {
+            songResults = if (p == 1) it else songResults.orEmpty() + it
+        }.size
+        SearchTab.SINGERS -> SearchApi.singers(q, page = p).also {
+            singerResults = if (p == 1) it else singerResults.orEmpty() + it
+        }.size
+        SearchTab.ALBUMS -> SearchApi.albums(q, page = p).also {
+            albumResults = if (p == 1) it else albumResults.orEmpty() + it
+        }.size
+        SearchTab.PLAYLISTS -> SearchApi.playlists(q, page = p).also {
+            playlistResults = if (p == 1) it else playlistResults.orEmpty() + it
+        }.size
+    }
+
+    fun appendMore() {
+        val q = searchedQuery ?: return
+        val t = SearchTab.entries[tab]
+        if (appending || loading || exhausted[t] == true) return
+        val cur = pageByTab[t] ?: return
+        appending = true
+        scope.launch {
+            val next = cur + 1
+            val n = runCatching { loadPage(t, q, next) }.getOrDefault(0)
+            if (n <= 0) exhausted[t] = true else pageByTab[t] = next
+            appending = false
+        }
+    }
+
     fun doSearch() {
         val q = query.trim()
         if (q.isEmpty() || loading) return
         scope.launch {
             loading = true
             error = null
-            runCatching { SearchApi.songs(q) }
+            pageByTab.clear(); exhausted.clear()
+            songResults = null; singerResults = null; albumResults = null; playlistResults = null
+            runCatching { loadPage(SearchTab.SONGS, q, 1) }
                 .onSuccess {
-                    songResults = it
-                    singerResults = null; albumResults = null; playlistResults = null
                     searchedQuery = q
                     tab = 0
-                    error = if (it.isEmpty()) "没有找到相关歌曲" else null
+                    pageByTab[SearchTab.SONGS] = 1
+                    error = if (songResults.isNullOrEmpty()) "没有找到相关歌曲" else null
                     SearchHistoryStore.add(q)   // 点击搜索才记录
                 }
                 .onFailure { error = it.message }
@@ -163,19 +201,23 @@ fun SearchScreen(
         scope.launch {
             loading = true
             error = null
-            runCatching {
-                when (t) {
-                    SearchTab.SONGS -> songResults = SearchApi.songs(q)
-                    SearchTab.SINGERS -> singerResults = SearchApi.singers(q)
-                    SearchTab.ALBUMS -> albumResults = SearchApi.albums(q)
-                    SearchTab.PLAYLISTS -> playlistResults = SearchApi.playlists(q)
-                }
-            }.onFailure { error = it.message ?: "加载失败" }
+            runCatching { loadPage(t, q, 1) }
+                .onSuccess { pageByTab[t] = 1 }
+                .onFailure { error = it.message ?: "加载失败" }
             loading = false
         }
     }
 
     Box(Modifier.fillMaxSize().imePadding()) {
+        // 滚到底部前几项就续页（每页 30 首）；必须在组合上下文里，不能放进 LazyListScope。
+        LaunchedEffect(listState, tab, searchedQuery) {
+            androidx.compose.runtime.snapshotFlow {
+                val info = listState.layoutInfo
+                (info.visibleItemsInfo.lastOrNull()?.index ?: -1) to info.totalItemsCount
+            }.collect { (last, total) ->
+                if (total > 0 && last >= total - 3) appendMore()
+            }
+        }
         // 2026-09-30 改版：**所有元素都随内容一起上滑**（返回/标题/下载钮、搜索框、标签栏
         // 全部是列表的表头 item，不再悬浮折叠），与主页/列表页一致；内容从状态栏底下滚过。
         LazyColumn(
@@ -352,11 +394,25 @@ fun SearchScreen(
                             onOpenSinger = onOpenSinger,
                             screenWidth = screenWidth,
                         )
+                        if (appending) {
+                            item(key = "appending") {
+                                Box(
+                                    Modifier.fillMaxWidth().padding(vertical = 18.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    CircularProgressIndicator(
+                                        Modifier.size(20.dp), strokeWidth = 2.dp, color = colors.accent,
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
                 else -> {
                     // 搜索历史：仅当确有历史时才出现（用户要求：没有历史就什么都不显示）。
                     if (history.isNotEmpty()) {
+                        // 与上面的搜索框拉开（用户：贴太近）
+                        item(key = "historyGap") { Spacer(Modifier.height(18.dp)) }
                         item(key = "history") {
                             Column(Modifier.padding(horizontal = 16.dp)) {
                                 TrackListBlock {

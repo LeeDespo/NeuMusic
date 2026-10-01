@@ -76,7 +76,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun BottomBarFade(height: Dp = 24.dp, color: Color? = null) {
     val colors = LocalShadeColors.current
-    val end = color ?: barTint(colors)
+    val end = color ?: colors.background
     Box(
         Modifier
             .fillMaxWidth()
@@ -91,13 +91,12 @@ fun BottomBarFade(height: Dp = 24.dp, color: Color? = null) {
 }
 
 /**
- * 底栏（播放栏/选择底栏）的底色：**不再直接用背景色**——那样面板与页面糊成一片、
- * 看不出来是一条底栏。浅色主题偏黑灰、深色主题偏灰白，渐隐条与面板共用它，交界才不露痕。
+ * 底栏（播放栏/选择底栏）的底色。**用户 2026-10-01 定：就用背景色**——
+ * 试过浅色偏黑灰/深色偏灰白（`lerp` 混 7~9%），观感反而更碎，回退。
+ * 需要区分底栏时改这里一处即可。
  */
 @Composable
-fun barTint(colors: ShadeColors): Color =
-    if (colors.isDark) lerp(colors.background, Color.White, 0.09f)
-    else lerp(colors.background, Color.Black, 0.07f)
+fun barTint(colors: ShadeColors): Color = colors.background
 
 /** 无裁剪的点击层：给带外阴影的子内容（如凸起画框封面）包点击时不能用 flatPressable——它的 clip 会把阴影裁掉。 */
 private fun Modifier.tap(onClick: () -> Unit): Modifier =
@@ -175,7 +174,7 @@ fun PlayerBar(
                 // 面板本身**不画阴影、不做圆角**（用户 2026-10-01 规格）：最外围的那圈光影
                 // 会与上方的渐隐条糊在一起，圆角也让它和贴边的底栏格格不入。现在它是
                 // 一块纯底色面板，靠 BottomBarFade 与内容「溶」在一起。
-                .background(barTint(colors))
+                .background(colors.background)
                 // 切歌手势：左滑下一首、右滑上一首。按钮的 tap 在拖动超距后自然取消，互不干扰。
                 .pointerInput(Unit) {
                     var total = 0f

@@ -81,7 +81,11 @@ fun BoxScope.HorizontalEdgeFades(
  */
 @Composable
 fun BoxScope.TopEdgeFade(
-    extraHeight: Dp = 48.dp,
+    /**
+     * 渐隐带总高（状态栏 + 它）。**别调太大**：带子越长越像"整体变淡"、看不出有一条线；
+     * 32dp 是"能看出界线、又不生硬"的区间（用户反馈 48dp 时"感觉和改动前一样"）。
+     */
+    extraHeight: Dp = 32.dp,
     belowStatusBar: Dp = TOP_FADE_BELOW_STATUS_BAR,
     modifier: Modifier = Modifier,
 ) {

@@ -76,7 +76,8 @@ fun ShadeSwitch(
                 .fillMaxSize()
                 .padding(2.dp)
                 .clip(RoundedCornerShape(h / 2))
-                .background(lerp(colors.background, colors.accent, 0.55f * t)),
+                // 打开时轨道直接用强调色（原来混了 55% 背景，看着比真正的强调色发白发灰）
+                .background(lerp(colors.background, colors.accent, t)),
         )
         // 滑块：凸起小圆
         Box(

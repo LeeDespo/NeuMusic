@@ -187,7 +187,13 @@ fun <T> androidx.compose.foundation.lazy.LazyListScope.cardGridItems(
     items.chunked(columns).forEach { row ->
         item(key = row.joinToString("|") { key(it) }) {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = horizontalPadding).padding(bottom = 18.dp),
+                Modifier
+                    .fillMaxWidth()
+                    .animateItem(   // 切标签时整行淡出/淡入（短过渡）
+                        fadeInSpec = androidx.compose.animation.core.tween(170),
+                        fadeOutSpec = androidx.compose.animation.core.tween(120),
+                    )
+                    .padding(horizontal = horizontalPadding).padding(bottom = 18.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 row.forEach { m ->

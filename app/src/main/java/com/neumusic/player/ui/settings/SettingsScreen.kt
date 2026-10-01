@@ -2,6 +2,13 @@ package com.neumusic.player.ui.settings
 
 import android.webkit.CookieManager
 import android.webkit.WebView
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -149,7 +156,12 @@ fun SettingsScreen(onBack: () -> Unit) {
             }
             Spacer(Modifier.height(6.dp))
 
-            if (tab == 0) {
+            AnimatedVisibility(
+                visible = tab == 0,
+                // 切换分区：上升淡入 / 下降淡出，时长短（用户要求"整体过渡时间要短"）
+                enter = fadeIn(tween(160)) + slideInVertically(tween(160)) { it / 10 },
+                exit = fadeOut(tween(120)) + slideOutVertically(tween(120)) { it / 10 },
+            ) {
             // ── 账号 ──
             SectionTitle("账号")
             Column(
@@ -196,7 +208,12 @@ fun SettingsScreen(onBack: () -> Unit) {
             }
             Spacer(Modifier.height(18.dp))
 
-            if (tab == 3) {
+            AnimatedVisibility(
+                visible = tab == 3,
+                // 切换分区：上升淡入 / 下降淡出，时长短（用户要求"整体过渡时间要短"）
+                enter = fadeIn(tween(160)) + slideInVertically(tween(160)) { it / 10 },
+                exit = fadeOut(tween(120)) + slideOutVertically(tween(120)) { it / 10 },
+            ) {
             // ── 音质 ──
             SectionTitle("播放音质")
             Column(
@@ -225,7 +242,12 @@ fun SettingsScreen(onBack: () -> Unit) {
             }
             Spacer(Modifier.height(18.dp))
 
-            if (tab == 1) {
+            AnimatedVisibility(
+                visible = tab == 1,
+                // 切换分区：上升淡入 / 下降淡出，时长短（用户要求"整体过渡时间要短"）
+                enter = fadeIn(tween(160)) + slideInVertically(tween(160)) { it / 10 },
+                exit = fadeOut(tween(120)) + slideOutVertically(tween(120)) { it / 10 },
+            ) {
             // ── 外观 ──
             SectionTitle("外观")
             Column(
@@ -336,7 +358,12 @@ fun SettingsScreen(onBack: () -> Unit) {
             }
             Spacer(Modifier.height(18.dp))
 
-            if (tab == 2) {
+            AnimatedVisibility(
+                visible = tab == 2,
+                // 切换分区：上升淡入 / 下降淡出，时长短（用户要求"整体过渡时间要短"）
+                enter = fadeIn(tween(160)) + slideInVertically(tween(160)) { it / 10 },
+                exit = fadeOut(tween(120)) + slideOutVertically(tween(120)) { it / 10 },
+            ) {
             // ── 光影（随时间变化的新拟物光照；模型与曲线见 shade/DayLight.kt）──
             SectionTitle("光影")
             Column(
@@ -451,7 +478,12 @@ fun SettingsScreen(onBack: () -> Unit) {
             }
             Spacer(Modifier.height(18.dp))
 
-            if (tab == 4) {
+            AnimatedVisibility(
+                visible = tab == 4,
+                // 切换分区：上升淡入 / 下降淡出，时长短（用户要求"整体过渡时间要短"）
+                enter = fadeIn(tween(160)) + slideInVertically(tween(160)) { it / 10 },
+                exit = fadeOut(tween(120)) + slideOutVertically(tween(120)) { it / 10 },
+            ) {
             // ── 下载 ──
             SectionTitle("下载")
             Column(
@@ -494,7 +526,12 @@ fun SettingsScreen(onBack: () -> Unit) {
             }
             Spacer(Modifier.height(18.dp))
 
-            if (tab == 3) {
+            AnimatedVisibility(
+                visible = tab == 3,
+                // 切换分区：上升淡入 / 下降淡出，时长短（用户要求"整体过渡时间要短"）
+                enter = fadeIn(tween(160)) + slideInVertically(tween(160)) { it / 10 },
+                exit = fadeOut(tween(120)) + slideOutVertically(tween(120)) { it / 10 },
+            ) {
             // ── 播放栏与播放页（原本混在「下载」区里，2026-10-01 分区整理独立出来）──
             SectionTitle("播放栏与播放页")
             Column(
@@ -531,7 +568,12 @@ fun SettingsScreen(onBack: () -> Unit) {
             }
             Spacer(Modifier.height(18.dp))
 
-            if (tab == 5) {
+            AnimatedVisibility(
+                visible = tab == 5,
+                // 切换分区：上升淡入 / 下降淡出，时长短（用户要求"整体过渡时间要短"）
+                enter = fadeIn(tween(160)) + slideInVertically(tween(160)) { it / 10 },
+                exit = fadeOut(tween(120)) + slideOutVertically(tween(120)) { it / 10 },
+            ) {
             // ── 诊断日志（2026-09-30 规格）：结构化、可开关、可清空、可限容、可导出 ──
             SectionTitle("诊断日志")
             Column(
