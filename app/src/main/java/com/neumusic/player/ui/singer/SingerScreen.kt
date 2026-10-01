@@ -58,6 +58,7 @@ import com.neumusic.player.shade.flatPressable
 import com.neumusic.player.shade.shadeInset
 import com.neumusic.player.shade.shadePressable
 import com.neumusic.player.shade.shadeSurface
+import com.neumusic.player.ui.common.SingerAvatarFrame
 import com.neumusic.player.ui.common.BlockRowSurface
 import com.neumusic.player.ui.common.CoverPlaceholder
 import com.neumusic.player.ui.common.MediaCard
@@ -229,28 +230,14 @@ fun SingerScreen(
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = colors.accent, modifier = Modifier.size(19.dp))
                         }
                     }
-                    // 方形头像 + 凸起画框，居中。图像内缩 10dp/圆角 14——与歌手卡克隆卡完全一致，
-                    // 「飞位」转场落位瞬间才能无缝交接。
-                    Box(
-                        Modifier
-                            .size(216.dp)
-                            .shadeSurface(cornerRadius = 20.dp, offset = 6.dp, blur = 12.dp)
-                            .onGloballyPositioned { onAvatarBounds(it.boundsInRoot()) },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (info.pic.isEmpty()) {
-                            Box(
-                                Modifier.size(196.dp).clip(RoundedCornerShape(14.dp)).background(colors.background),
-                                contentAlignment = Alignment.Center,
-                            ) { CoverPlaceholder() }
-                        } else {
-                            AsyncImage(
-                                model = info.pic,
-                                contentDescription = "歌手头像",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.size(196.dp).clip(RoundedCornerShape(14.dp)).background(colors.background),
-                            )
-                        }
+                    // 方形头像 + 凸起画框（SingerAvatarFrame，216dp = 这套规格的基准尺寸，
+                    // 搜索页歌手卡 / 主页关注歌手卡都按同一比例的等比换算，飞位交接才无缝）。
+                    Box(Modifier.onGloballyPositioned { onAvatarBounds(it.boundsInRoot()) }) {
+                        SingerAvatarFrame(
+                            pic = info.pic,
+                            desc = "歌手头像",
+                            modifier = Modifier.size(216.dp),
+                        )
                     }
                     Spacer(Modifier.height(14.dp))
                     // 平的两行居中文字（不再凹陷标签）：歌手名 / N首歌 · N张专辑

@@ -72,6 +72,7 @@ import com.neumusic.player.shade.shadePressable
 import com.neumusic.player.shade.shadeSurface
 import com.neumusic.player.ui.common.AlbumArt
 import com.neumusic.player.ui.common.CoverPlaceholder
+import com.neumusic.player.ui.common.SingerAvatarFrame
 import com.neumusic.player.ui.common.toastMain
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -586,7 +587,14 @@ private fun HomeCardRow(
     }
 }
 
-/** 推荐歌曲卡（主页顶部，无标题）：左=画框封面；右=歌名凸起块 + 介绍框（边框凸起、内凹、固定大小、可滚动）+ 竖排三钮。 */
+/**
+ * 推荐歌曲卡（主页顶部，用户 2026-10-01 规格）：**整块大圆角凸起承载卡**，
+ * 内部的元素重新排布——
+ * - 封面仍是凸起画框（容器级凸起面板上的独立控件，与播放栏封面同理），点封面 = 播放/暂停；
+ * - 歌名/歌手是**平**的文字（卡片已经是凸起，不再在凸起上叠凸起块），都走跑马灯；
+ * - 说明文字坐在**凹陷槽**里（凸起容器内以凹陷表示槽位），固定高度、可滚动；
+ * - 三个动作钮排成底部一行：播放/暂停、喜欢、刷新，右侧一行小字点明来源。
+ */
 @Composable
 private fun RecommendCard(
     entry: RecommendStore.Entry,
@@ -598,76 +606,75 @@ private fun RecommendCard(
 ) {
     val colors = LocalShadeColors.current
     val track = entry.track
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 14.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp)
+            .shadeSurface(cornerRadius = 26.dp, offset = 6.dp, blur = 12.dp)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        // 封面：凸起画框（左侧）；点封面 = 播放/暂停
-        Box(Modifier.cardTap { onPlayPause() }) {
-            AlbumArt(track.coverUrl, 132.dp, corner = 20.dp, plate = true)
-        }
-        Column(
-            Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            // 歌名凸起块
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .shadeSurface(cornerRadius = 14.dp, offset = 4.dp, blur = 6.dp)
-                    .padding(horizontal = 12.dp, vertical = 9.dp),
+        Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Top) {
+            // 封面：凸起画框；点封面 = 播放/暂停
+            Box(Modifier.cardTap { onPlayPause() }) {
+                AlbumArt(track.coverUrl, 124.dp, corner = 20.dp, plate = true)
+            }
+            Column(
+                Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text(
                     track.name,
-                    color = colors.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                    color = colors.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     modifier = Modifier.fillMaxWidth().basicMarquee(),
                 )
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
-                // 介绍框：凸起 + 边框修饰，中间凹陷，固定大小；文字裁剪界线在边框处
+                if (track.singer.isNotEmpty()) {
+                    Text(
+                        track.singer,
+                        color = colors.textSecondary, fontSize = 11.sp,
+                        maxLines = 1,
+                        modifier = Modifier.fillMaxWidth().basicMarquee(),
+                    )
+                }
+                // 说明槽：凹陷（凸起容器内表槽位），固定高度、文字超出可滚
                 Box(
                     Modifier
-                        .weight(1f)
-                        .height(150.dp)
-                        .shadeSurface(cornerRadius = 14.dp, offset = 4.dp, blur = 6.dp)
-                        .border(1.dp, colors.textTertiary.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
-                        .padding(2.dp),
+                        .fillMaxWidth()
+                        .height(104.dp)
+                        .shadeInset(cornerRadius = 14.dp, offset = 3.dp, blur = 5.dp)
+                        .padding(horizontal = 10.dp),
                 ) {
-                    Box(
-                        Modifier
+                    Text(
+                        entry.intro.ifEmpty { "该歌曲暂无歌曲详情" },
+                        color = colors.textSecondary, fontSize = 11.sp, lineHeight = 16.sp,
+                        modifier = Modifier
                             .fillMaxSize()
-                            .clip(RoundedCornerShape(11.dp))
-                            .shadeInset(cornerRadius = 11.dp, offset = 2.dp, blur = 4.dp)
-                            .padding(horizontal = 10.dp),
-                    ) {
-                        val text = entry.intro.ifEmpty { "该歌曲暂无歌曲详情" }
-                        Text(
-                            text,
-                            color = colors.textSecondary, fontSize = 11.sp, lineHeight = 16.sp,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .clipToBounds()
-                                .verticalScroll(rememberScrollState())
-                                .padding(vertical = 6.dp),
-                        )
-                    }
-                }
-                // 竖排三钮：播放/暂停、喜欢、刷新
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    RecBtn(
-                        if (playingThis) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                        if (playingThis) "暂停" else "播放", colors.accent,
-                    ) { onPlayPause() }
-                    RecBtn(
-                        if (liked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                        if (liked) "取消喜欢" else "喜欢",
-                        if (liked) colors.accent else colors.textSecondary,
-                    ) { onLike() }
-                    RecBtn(Icons.Filled.Refresh, "刷新推荐", colors.textSecondary) { onRefresh() }
+                            .clipToBounds()
+                            .verticalScroll(rememberScrollState())
+                            .padding(vertical = 6.dp),
+                    )
                 }
             }
+        }
+        // 底部一行：三个动作钮 + 来源小字
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            RecBtn(
+                if (playingThis) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                if (playingThis) "暂停" else "播放", colors.accent,
+            ) { onPlayPause() }
+            RecBtn(
+                if (liked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                if (liked) "取消喜欢" else "喜欢",
+                if (liked) colors.accent else colors.textSecondary,
+            ) { onLike() }
+            RecBtn(Icons.Filled.Refresh, "刷新推荐", colors.textSecondary) { onRefresh() }
+            Spacer(Modifier.weight(1f))
+            Text("来自猜你喜欢", color = colors.textTertiary, fontSize = 10.sp)
         }
     }
 }
@@ -704,29 +711,9 @@ private fun SmallSingerCard(s: FollowSinger, onClick: (Rect) -> Unit) {
             .onGloballyPositioned { bounds = it.boundsInRoot() }
             .cardTap { onClick(bounds) },
     ) {
-        // 画框规格与歌手页头像完全一致（shade 20/6/12，图像内缩 10dp、圆角 14）
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .aspectRatio(1f)
-                .shadeSurface(cornerRadius = 20.dp, offset = 6.dp, blur = 12.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (s.pic.isEmpty()) {
-                CoverPlaceholder()
-            } else {
-                AsyncImage(
-                    model = s.pic,
-                    contentDescription = s.name,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(1f)
-                        .padding(10.dp)
-                        .clip(RoundedCornerShape(14.dp)),
-                )
-            }
-        }
+        // 画框规格按比例与歌手页头像一致（SingerAvatarFrame：216dp 基准等比换算），
+        // 三处宽度不同也不会在飞位交接时跳。
+        SingerAvatarFrame(pic = s.pic, desc = s.name, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(8.dp))
         // 名字过长自动换行（最多两行，不再截断）
         Text(

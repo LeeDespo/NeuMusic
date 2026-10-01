@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -32,6 +33,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -62,6 +65,7 @@ import com.neumusic.player.data.api.ApiCache
 import com.neumusic.player.data.api.UserApi
 import com.neumusic.player.shade.LocalShadeColors
 import com.neumusic.player.shade.DayLightHost
+import com.neumusic.player.shade.LIGHT_RATIO_RANGE
 import com.neumusic.player.shade.MAX_OFFSET_RANGE
 import com.neumusic.player.shade.flatPressable
 import com.neumusic.player.shade.formatHour
@@ -71,9 +75,13 @@ import com.neumusic.player.shade.shadePressable
 import com.neumusic.player.shade.shadeSurface
 import com.neumusic.player.ui.common.HorizontalShadeSlider
 import com.neumusic.player.ui.common.SegmentedControl
+import com.neumusic.player.ui.common.ShadeSwitchRow
 import com.neumusic.player.ui.common.toastMain
 import com.neumusic.player.ui.home.DetailTopBar
 import kotlinx.coroutines.launch
+
+/** 设置页分区（分段控制器的选项，顺序即 tab 下标）。 */
+private val SETTING_TABS = listOf("账号", "外观", "光影", "播放", "下载", "其它")
 
 @Composable
 fun SettingsScreen(onBack: () -> Unit) {
@@ -83,6 +91,10 @@ fun SettingsScreen(onBack: () -> Unit) {
 
     var cred by remember { mutableStateOf(Prefs.credential) }
     var showWebLogin by remember { mutableStateOf(false) }
+    // 分区（用户 2026-10-01 规格：设置项按区分组、用分段控制器切换）
+    var tab by remember { mutableIntStateOf(0) }
+    val scroll = rememberScrollState()
+    LaunchedEffect(tab) { scroll.scrollTo(0) }   // 换区回到顶部
     var quality by remember { mutableStateOf(Prefs.quality) }
     var themeMode by remember { mutableStateOf(Prefs.themeMode) }
     var accentMode by remember { mutableStateOf(Prefs.accentMode) }
@@ -114,10 +126,27 @@ fun SettingsScreen(onBack: () -> Unit) {
     // 顶栏随页面滚动（用户规定）：放进滚动列第一项
     Column(Modifier.fillMaxSize()) {
         Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+            Modifier.fillMaxSize().verticalScroll(scroll)
                 .imePadding(),
         ) {
             DetailTopBar("设置", onBack, horizontalPadding = 16.dp)
+
+            // ── 分区切换（用户 2026-10-01 规格）：平的分段控制器，选中=凹陷圆角矩形 ──
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp)
+                    .horizontalScroll(rememberScrollState()),
+            ) {
+                SegmentedControl(
+                    options = SETTING_TABS,
+                    selected = tab,
+                    onSelect = { tab = it },
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+
+            if (tab == 0) {
             // ── 账号 ──
             SectionTitle("账号")
             Column(
@@ -160,8 +189,10 @@ fun SettingsScreen(onBack: () -> Unit) {
                     }
                 }
             }
+            }
             Spacer(Modifier.height(18.dp))
 
+            if (tab == 3) {
             // ── 音质 ──
             SectionTitle("播放音质")
             Column(
@@ -186,8 +217,10 @@ fun SettingsScreen(onBack: () -> Unit) {
                     fontSize = 11.sp, color = colors.textTertiary, modifier = Modifier.padding(8.dp),
                 )
             }
+            }
             Spacer(Modifier.height(18.dp))
 
+            if (tab == 1) {
             // ── 外观 ──
             SectionTitle("外观")
             Column(
@@ -201,13 +234,13 @@ fun SettingsScreen(onBack: () -> Unit) {
                     "深色模式", fontSize = 13.sp, color = colors.textSecondary,
                     modifier = Modifier.padding(start = 6.dp, top = 2.dp),
                 )
-                ThemeMode.entries.forEach { m ->
-                    ChoiceRow(
-                        label = m.label,
-                        selected = m == themeMode,
-                        onClick = {
-                            Prefs.themeMode = m
-                            themeMode = m
+                Box(Modifier.padding(start = 6.dp)) {
+                    SegmentedControl(
+                        options = ThemeMode.entries.map { it.label },
+                        selected = themeMode.ordinal,
+                        onSelect = {
+                            themeMode = ThemeMode.entries[it]
+                            Prefs.themeMode = ThemeMode.entries[it]
                         },
                     )
                 }
@@ -223,13 +256,13 @@ fun SettingsScreen(onBack: () -> Unit) {
                     "强调色", fontSize = 13.sp, color = colors.textSecondary,
                     modifier = Modifier.padding(start = 6.dp),
                 )
-                AccentMode.entries.forEach { a ->
-                    ChoiceRow(
-                        label = a.label,
-                        selected = a == accentMode,
-                        onClick = {
-                            Prefs.accentMode = a
-                            accentMode = a
+                Box(Modifier.padding(start = 6.dp)) {
+                    SegmentedControl(
+                        options = AccentMode.entries.map { it.label },
+                        selected = accentMode.ordinal,
+                        onSelect = {
+                            accentMode = AccentMode.entries[it]
+                            Prefs.accentMode = AccentMode.entries[it]
                         },
                     )
                 }
@@ -248,13 +281,13 @@ fun SettingsScreen(onBack: () -> Unit) {
                     "立体感", fontSize = 13.sp, color = colors.textSecondary,
                     modifier = Modifier.padding(start = 6.dp),
                 )
-                Relief.entries.forEach { r ->
-                    ChoiceRow(
-                        label = r.label,
-                        selected = r == relief,
-                        onClick = {
-                            Prefs.relief = r
-                            relief = r
+                Box(Modifier.padding(start = 6.dp)) {
+                    SegmentedControl(
+                        options = Relief.entries.map { it.label },
+                        selected = relief.ordinal,
+                        onSelect = {
+                            relief = Relief.entries[it]
+                            Prefs.relief = Relief.entries[it]
                         },
                     )
                 }
@@ -270,13 +303,13 @@ fun SettingsScreen(onBack: () -> Unit) {
                     "歌词字号", fontSize = 13.sp, color = colors.textSecondary,
                     modifier = Modifier.padding(start = 6.dp),
                 )
-                LyricTextSize.entries.forEach { t ->
-                    ChoiceRow(
-                        label = t.label,
-                        selected = t == lyricSize,
-                        onClick = {
-                            Prefs.lyricTextSize = t
-                            lyricSize = t
+                Box(Modifier.padding(start = 6.dp)) {
+                    SegmentedControl(
+                        options = LyricTextSize.entries.map { it.label },
+                        selected = lyricSize.ordinal,
+                        onSelect = {
+                            lyricSize = LyricTextSize.entries[it]
+                            Prefs.lyricTextSize = LyricTextSize.entries[it]
                         },
                     )
                 }
@@ -288,23 +321,16 @@ fun SettingsScreen(onBack: () -> Unit) {
                     "歌词翻译", fontSize = 13.sp, color = colors.textSecondary,
                     modifier = Modifier.padding(start = 6.dp),
                 )
-                ChoiceRow(
+                ShadeSwitchRow(
                     label = "显示翻译",
-                    selected = showTrans,
-                    onClick = { showTrans = true; Prefs.showLyricTranslation = true },
-                )
-                ChoiceRow(
-                    label = "关闭翻译",
-                    selected = !showTrans,
-                    onClick = { showTrans = false; Prefs.showLyricTranslation = false },
-                )
-                Text(
-                    "仅当曲目本身带翻译时才会显示（QQ 只对少部分曲目提供翻译，多数为空）。",
-                    fontSize = 11.sp, color = colors.textTertiary, modifier = Modifier.padding(8.dp),
-                )
+                    checked = showTrans,
+                    subtitle = "仅当曲目本身带翻译时才会显示（QQ 只对少部分曲目提供，多数为空）。",
+                ) { showTrans = it; Prefs.showLyricTranslation = it }
+            }
             }
             Spacer(Modifier.height(18.dp))
 
+            if (tab == 2) {
             // ── 光影（随时间变化的新拟物光照；模型与曲线见 shade/DayLight.kt）──
             SectionTitle("光影")
             Column(
@@ -385,6 +411,10 @@ fun SettingsScreen(onBack: () -> Unit) {
                         "最大偏移", DayLightHost.maxOffset, 0f..MAX_OFFSET_RANGE,
                         text = "%.1f dp".format(DayLightHost.maxOffset),
                     ) { DayLightHost.maxOffset = it }
+                    CalibSlider(
+                        "高光偏移倍数", DayLightHost.lightRatio, 0f..LIGHT_RATIO_RANGE,
+                        text = "%.2f×".format(DayLightHost.lightRatio),
+                    ) { DayLightHost.lightRatio = it }
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
                         Text(
                             "恢复默认",
@@ -396,8 +426,10 @@ fun SettingsScreen(onBack: () -> Unit) {
                     }
                 }
             }
+            }
             Spacer(Modifier.height(18.dp))
 
+            if (tab == 4) {
             // ── 下载 ──
             SectionTitle("下载")
             Column(
@@ -436,8 +468,10 @@ fun SettingsScreen(onBack: () -> Unit) {
                     fontSize = 11.sp, color = colors.textTertiary, modifier = Modifier.padding(8.dp),
                 )
             }
+            }
             Spacer(Modifier.height(18.dp))
 
+            if (tab == 3) {
             // ── 播放栏与播放页（原本混在「下载」区里，2026-10-01 分区整理独立出来）──
             SectionTitle("播放栏与播放页")
             Column(
@@ -451,15 +485,11 @@ fun SettingsScreen(onBack: () -> Unit) {
                     "播放栏", fontSize = 13.sp, color = colors.textSecondary,
                     modifier = Modifier.padding(start = 6.dp),
                 )
-                ChoiceRow(
+                ShadeSwitchRow(
                     label = "播放条音频可视化",
-                    selected = barViz,
-                    onClick = { Prefs.barViz = !barViz; barViz = !barViz },
-                )
-                Text(
-                    "在底部播放栏显示随音乐起伏的电平条。",
-                    fontSize = 11.sp, color = colors.textTertiary, modifier = Modifier.padding(8.dp),
-                )
+                    checked = barViz,
+                    subtitle = "在底部播放栏显示随音乐起伏的电平条。",
+                ) { barViz = it; Prefs.barViz = it }
 
                 Spacer(Modifier.height(4.dp))
 
@@ -468,18 +498,16 @@ fun SettingsScreen(onBack: () -> Unit) {
                     "播放页", fontSize = 13.sp, color = colors.textSecondary,
                     modifier = Modifier.padding(start = 6.dp),
                 )
-                ChoiceRow(
+                ShadeSwitchRow(
                     label = "黑胶唱片模式",
-                    selected = vinyl,
-                    onClick = { Prefs.vinylMode = !vinyl; vinyl = !vinyl },
-                )
-                Text(
-                    "封面按唱片机样式呈现：画框加宽并刻上细密的唱片纹路，播放时唱片缓缓旋转，阴影保持不动。",
-                    fontSize = 11.sp, color = colors.textTertiary, modifier = Modifier.padding(8.dp),
-                )
+                    checked = vinyl,
+                    subtitle = "封面按唱片机样式呈现：画框加宽并刻上唱片纹路，播放时缓缓旋转，阴影保持不动。",
+                ) { vinyl = it; Prefs.vinylMode = it }
+            }
             }
             Spacer(Modifier.height(18.dp))
 
+            if (tab == 5) {
             // ── 诊断日志（2026-09-30 规格）：结构化、可开关、可清空、可限容、可导出 ──
             SectionTitle("诊断日志")
             Column(
@@ -488,15 +516,11 @@ fun SettingsScreen(onBack: () -> Unit) {
                     .padding(18.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                ChoiceRow(
+                ShadeSwitchRow(
                     label = "启用诊断日志",
-                    selected = logging,
-                    onClick = { Prefs.loggingEnabled = !logging; logging = !logging },
-                )
-                Text(
-                    "记录推荐/播放/收藏等关键请求的结构化日志；关闭后完全静默。超上限自动裁掉较早的一半。",
-                    fontSize = 11.sp, color = colors.textTertiary, modifier = Modifier.padding(8.dp),
-                )
+                    checked = logging,
+                    subtitle = "记录推荐/播放/收藏等关键请求的结构化日志；关闭后完全静默。超上限自动裁掉较早的一半。",
+                ) { logging = it; Prefs.loggingEnabled = it }
                 Row(
                     Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -573,6 +597,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 )
             }
             Spacer(Modifier.height(24.dp))
+            }
         }
     }
 }

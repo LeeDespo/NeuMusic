@@ -1,5 +1,6 @@
 package com.neumusic.player.ui.common
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,7 +26,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.neumusic.player.shade.LocalShadeColors
 import com.neumusic.player.shade.shadePressable
-import com.neumusic.player.shade.shadeSurfaceTop
 import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
@@ -68,7 +68,8 @@ fun SelectionBar(
         Column(
             Modifier
                 .fillMaxWidth()
-                .shadeSurfaceTop(cornerRadius = 24.dp, offset = 6.dp, blur = 10.dp)
+                // 与播放栏同款：不画阴影、不做圆角（最外围光影会与上方渐隐条糊在一起）
+                .background(colors.background)
                 .navigationBarsPadding()
                 .padding(horizontal = 28.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,

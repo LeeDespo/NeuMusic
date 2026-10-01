@@ -38,6 +38,8 @@ class Lighting(
     val warmth: Float,
     /** 「最大偏移」倍率（相对基准 10dp）。 */
     val k: Float,
+    /** 高光偏移相对暗影偏移的倍数（1 = 完全对称，与暗影等长反向）。 */
+    val lightK: Float,
 )
 
 // ───────────────────────── 偏移：日夜共用的一条连续扫描 ─────────────────────────
@@ -101,6 +103,9 @@ private const val REF_HOUR_DEFAULT = 12f
 /** 「最大偏移」滑杆的基准值与满量程（dp）。 */
 const val MAX_OFFSET_BASE = 10f
 const val MAX_OFFSET_RANGE = 40f
+
+/** 「高光偏移倍数」满量程（1 = 与暗影等长反向，即对称）。 */
+const val LIGHT_RATIO_RANGE = 2f
 
 /** 色温锚点默认值（与实验一致）。 */
 const val DEFAULT_DAY_WARM = 0.53f
@@ -184,13 +189,14 @@ private fun sample(hour: Float, night: Boolean): Lighting {
     val h = hour.coerceIn(0f, 24f)
     val (sx, sy) = sampleOffset(h)
     val k = DayLightHost.maxOffset / MAX_OFFSET_BASE
+    val lightK = DayLightHost.lightRatio
     return if (night) {
         Lighting(
             sx = sx, sy = sy,
             blurDark = NIGHT_BLUR_DARK, blurLight = NIGHT_BLUR_LIGHT,
             alphaDark = NIGHT_ALPHA_DARK, alphaLight = NIGHT_ALPHA_LIGHT,
             warmth = warmthOfK(NIGHT_KELVIN, DayLightHost.dayWarm, DayLightHost.dayCold, DayLightHost.nightWarm),
-            k = k,
+            k = k, lightK = lightK,
         )
     } else {
         val d = sampleDayAttr(h)
@@ -199,7 +205,7 @@ private fun sample(hour: Float, night: Boolean): Lighting {
             blurDark = d.blurDark, blurLight = d.blurLight,
             alphaDark = d.alphaDark, alphaLight = d.alphaLight,
             warmth = warmthOfK(d.kelvin, DayLightHost.dayWarm, DayLightHost.dayCold, DayLightHost.nightWarm),
-            k = k,
+            k = k, lightK = lightK,
         )
     }
 }
@@ -265,6 +271,13 @@ object DayLightHost {
         get() = _maxOffset
         set(v) { _maxOffset = v; Prefs.lightingMaxOffset = v }
 
+    private var _lightRatio by mutableFloatStateOf(1f)
+
+    /** 光影标定：高光偏移相对暗影偏移的倍数（1 = 对称等长）。 */
+    var lightRatio: Float
+        get() = _lightRatio
+        set(v) { _lightRatio = v.coerceIn(0f, LIGHT_RATIO_RANGE); Prefs.lightingLightRatio = _lightRatio }
+
     /** 由 MainActivity 在 Prefs.init 之后调用，把磁盘值灌进运行时状态。 */
     fun install() {
         _mode = Prefs.lightingMode
@@ -273,6 +286,7 @@ object DayLightHost {
         _dayCold = Prefs.lightingDayCold
         _nightWarm = Prefs.lightingNightWarm
         _maxOffset = Prefs.lightingMaxOffset
+        _lightRatio = Prefs.lightingLightRatio
         setClockNow()
     }
 
@@ -281,6 +295,7 @@ object DayLightHost {
         dayCold = DEFAULT_DAY_COLD
         nightWarm = DEFAULT_NIGHT_WARM
         maxOffset = MAX_OFFSET_BASE
+        lightRatio = 1f
     }
 
     /** 「随时间变化」用的时钟：每 30 秒对一次（时刻轴只有 0.5h 粒度，够用）。 */

@@ -197,6 +197,10 @@ private fun DrawScope.drawShade(
     val path = roundedPath(cornerPx)
     val dx = offsetPx * light.sx * light.k
     val dy = offsetPx * light.sy * light.k
+    // 高光偏移 = 暗影偏移 × lightK（反向）。lightK = 1 时两影等长对称，
+    // 调小则高光贴得更近（用户可自定义的「高光相对暗影的偏移倍数」）。
+    val lx = -dx * light.lightK
+    val ly = -dy * light.lightK
     val blurD = blurPx * light.blurDark
     val blurL = blurPx * light.blurLight
     val cLight = tempTint(colors.shadowLight, light.warmth)
@@ -204,7 +208,7 @@ private fun DrawScope.drawShade(
 
     if (outerAlpha > 0.01f) {
         drawIntoCanvas { canvas ->
-            drawOffsetPath(canvas, path, -dx, -dy, nativePaint(cLight, outerAlpha * light.alphaLight, blurL))
+            drawOffsetPath(canvas, path, lx, ly, nativePaint(cLight, outerAlpha * light.alphaLight, blurL))
             drawOffsetPath(canvas, path, dx, dy, nativePaint(cDark, outerAlpha * light.alphaDark, blurD))
         }
     }
@@ -227,7 +231,7 @@ private fun DrawScope.drawShade(
                         nativePaint(cDark, innerAlpha * innerStrength * light.alphaDark, blurD * blurInside),
                     )
                     drawOffsetPath(
-                        c, complement, -dx * d, -dy * d,
+                        c, complement, lx * d, ly * d,
                         nativePaint(cLight, innerAlpha * 0.9f * light.alphaLight, blurL * blurInside),
                     )
                 }
@@ -287,7 +291,7 @@ fun Modifier.shadeSurfaceTop(cornerRadius: Dp = 22.dp, offset: Dp = 6.dp, blur: 
         if (a > 0.01f) {
             val shadow = roundedPath(cornerRadius.toPx())
             drawIntoCanvas { canvas ->
-                drawOffsetPath(canvas, shadow, -dx, -dy, nativePaint(cLight, a * light.alphaLight, blurL))
+                drawOffsetPath(canvas, shadow, -dx * light.lightK, -dy * light.lightK, nativePaint(cLight, a * light.alphaLight, blurL))
                 drawOffsetPath(canvas, shadow, dx, dy, nativePaint(cDark, a * light.alphaDark, blurD))
             }
         }
@@ -374,8 +378,10 @@ fun Modifier.blockSlice(
                     )
                 }
                 drawIntoCanvas { canvas ->
-                    drawOffsetPath(canvas, lightSlice, -dx, -dy, nativePaint(tempTint(colors.shadowLight, light.warmth), a * light.alphaLight, blurL))
-                    drawOffsetPath(canvas, darkSlice, dx, dy, nativePaint(tempTint(colors.shadowDark, light.warmth), a * light.alphaDark, blurD))
+                    drawOffsetPath(canvas, lightSlice, -dx * light.lightK, -dy * light.lightK,
+                        nativePaint(tempTint(colors.shadowLight, light.warmth), a * light.alphaLight, blurL))
+                    drawOffsetPath(canvas, darkSlice, dx, dy,
+                        nativePaint(tempTint(colors.shadowDark, light.warmth), a * light.alphaDark, blurD))
                 }
             }
             val r = CornerRadius(corner, corner)

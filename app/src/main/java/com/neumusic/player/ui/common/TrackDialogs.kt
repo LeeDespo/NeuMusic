@@ -1,23 +1,34 @@
 package com.neumusic.player.ui.common
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -26,12 +37,16 @@ import androidx.compose.ui.zIndex
 import com.neumusic.player.data.Track
 import com.neumusic.player.shade.LocalShadeColors
 import com.neumusic.player.shade.flatPressable
+import com.neumusic.player.shade.shadePressable
 import com.neumusic.player.shade.shadeSurface
 
 /**
- * 新拟物弹层：半透明压暗背景 + 居中凸起面板。
- * 面板内部按 UI 原则只放「平」的行（凸起容器内不再凸起）。
- * 点击背景关闭。
+ * 新拟物弹层（用户 2026-10-01 规格）：**整页呈现**，不再是「半透明压暗背景 + 居中浮层」。
+ *
+ * - 背景是**纯底色**（不再压暗、不再模糊），整页淡入浮现（透明度 + 轻微上浮）；
+ * - 顶栏一个凸起圆形收起钮 + 标题（与其它二级页面同一种形态）；
+ * - 内容放在**凸起卡片**里，卡片的光影就是全 App 那套（早前浮层压在压暗背景上时，
+ *   只有亮影看得见，观感像"两侧都是高光"，与别处不一致）。
  */
 @Composable
 fun ShadeDialog(
@@ -40,36 +55,65 @@ fun ShadeDialog(
     content: @Composable () -> Unit,
 ) {
     val colors = LocalShadeColors.current
+    var shown by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { shown = true }
+    val t by animateFloatAsState(
+        if (shown) 1f else 0f,
+        tween(240, easing = FastOutSlowInEasing),
+        label = "dialogIn",
+    )
     Box(
         Modifier
             .fillMaxSize()
             .zIndex(10f)
-            .background(Color.Black.copy(alpha = 0.35f))
-            .pointerInput(Unit) {
-                detectTapGestures { onDismiss() }   // 点背景关闭
+            .background(colors.background)
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .graphicsLayer {
+                alpha = t
+                translationY = (1f - t) * 16.dp.toPx()
             },
-        contentAlignment = Alignment.Center,
     ) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 36.dp)
-                .shadeSurface(cornerRadius = 26.dp, offset = 8.dp, blur = 14.dp)
-                // 面板消费点击，避免穿透到背景把弹窗关掉。
-                .pointerInput(Unit) { detectTapGestures { } },
-        ) {
-            Text(
-                title,
-                color = colors.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
-            )
-            content()
+        Column(Modifier.fillMaxSize()) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Box(
+                    Modifier
+                        .size(42.dp)
+                        .shadePressable(cornerRadius = 21.dp, offset = 4.dp, blur = 6.dp, onClick = onDismiss),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.KeyboardArrowDown, "收起",
+                        tint = colors.textPrimary, modifier = Modifier.size(22.dp),
+                    )
+                }
+                Text(
+                    title,
+                    color = colors.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .padding(bottom = 16.dp)
+                    .weight(1f, fill = false)
+                    .shadeSurface(cornerRadius = 24.dp, offset = 6.dp, blur = 10.dp)
+                    .padding(vertical = 8.dp),
+            ) {
+                content()
+            }
         }
     }
 }
 
 /**
- * 播放队列弹窗：当前播放队列，点选跳播。
+ * 播放队列弹窗（整页）：当前播放队列，点选跳播。
  * 播放详情页与播放栏共用（播放栏的第二行「播放列表」按钮也弹它）。
  */
 @Composable
@@ -81,7 +125,7 @@ fun QueueDialog(
 ) {
     val colors = LocalShadeColors.current
     ShadeDialog(title = "播放队列（${tracks.size} 首）", onDismiss = onDismiss) {
-        androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxWidth().height(360.dp)) {
+        androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxSize()) {
             itemsIndexed(tracks) { i, t ->
                 Row(
                     Modifier

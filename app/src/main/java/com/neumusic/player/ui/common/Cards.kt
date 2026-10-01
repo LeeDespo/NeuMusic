@@ -15,18 +15,84 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.neumusic.player.shade.LocalShadeColors
 import com.neumusic.player.shade.shadeSurface
+
+/**
+ * 歌手头像画框的**基准规格**：歌手页头像（216dp 见方）。
+ * 搜索页歌手卡、主页关注歌手卡与它之间会「飞位」交接，所以画框必须**按比例**统一——
+ * 三处卡片宽度不同（216/300/156dp），若用固定 dp 内缩，克隆卡缩放后画框粗细与圆角
+ * 就对不上目标头像，交接瞬间会跳（用户实测的「动画有漏洞」）。这里所有尺寸都按
+ * 「相对 216dp 的倍率」换算，于是任何卡片宽度下归一化规格都等于歌手页头像。
+ */
+private const val SINGER_FRAME_REF = 216f
+private const val SINGER_FRAME_INSET = 10f
+private const val SINGER_FRAME_CORNER = 14f
+private const val SINGER_FRAME_SHADE_RADIUS = 20f
+private const val SINGER_FRAME_SHADE_OFFSET = 6f
+private const val SINGER_FRAME_SHADE_BLUR = 12f
+
+/**
+ * 歌手头像（凸起方形画框 + 方形头像）。歌手页头像、搜索页歌手卡、主页关注歌手卡共用，
+ * 规格按 [SINGER_FRAME_REF] 等比换算——三处必须调这一个组件，不要再各自写一份。
+ */
+@Composable
+fun SingerAvatarFrame(
+    pic: String,
+    desc: String,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalShadeColors.current
+    val density = LocalDensity.current
+    // 先量出自身边长再换算（首帧 r=1，随后立刻校正；尺寸由父级决定，不会来回震荡）
+    var size by remember { mutableStateOf(0.dp) }
+    val r = if (size > 0.dp) size.value / SINGER_FRAME_REF else 1f
+    Box(
+        modifier
+            .aspectRatio(1f)
+            .onSizeChanged { size = with(density) { it.width.toDp() } }
+            .shadeSurface(
+                cornerRadius = (SINGER_FRAME_SHADE_RADIUS * r).dp,
+                offset = (SINGER_FRAME_SHADE_OFFSET * r).dp,
+                blur = (SINGER_FRAME_SHADE_BLUR * r).dp,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        val img = Modifier
+            .fillMaxWidth()
+            .aspectRatio(1f)
+            .padding((SINGER_FRAME_INSET * r).dp)
+            .clip(RoundedCornerShape((SINGER_FRAME_CORNER * r).dp))
+            .background(colors.background)
+        if (pic.isEmpty()) {
+            Box(img, contentAlignment = Alignment.Center) { CoverPlaceholder() }
+        } else {
+            AsyncImage(
+                model = pic,
+                contentDescription = desc,
+                contentScale = ContentScale.Crop,
+                modifier = img,
+            )
+        }
+    }
+}
 
 /**
  * 无裁剪的卡片点击层。**带外阴影的卡片不能用 flatPressable**——它的 clip 会把封面画框
@@ -150,29 +216,8 @@ fun SingerCard(
 ) {
     val colors = LocalShadeColors.current
     Column(modifier.fillMaxWidth().cardTap(onClick)) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .aspectRatio(1f)
-                .shadeSurface(cornerRadius = 20.dp, offset = 6.dp, blur = 12.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (pic.isEmpty()) {
-                Box(
-                    Modifier.fillMaxWidth().aspectRatio(1f).padding(10.dp)
-                        .clip(RoundedCornerShape(14.dp)).background(colors.background),
-                    contentAlignment = Alignment.Center,
-                ) { CoverPlaceholder() }
-            } else {
-                AsyncImage(
-                    model = pic,
-                    contentDescription = name,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxWidth().aspectRatio(1f).padding(10.dp)
-                        .clip(RoundedCornerShape(14.dp)).background(colors.background),
-                )
-            }
-        }
+        // 画框规格按比例与歌手页头像一致（见 SingerAvatarFrame）
+        SingerAvatarFrame(pic = pic, desc = name, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(10.dp))
         Text(
             name,

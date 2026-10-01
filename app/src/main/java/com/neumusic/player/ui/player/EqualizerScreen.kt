@@ -54,6 +54,7 @@ import com.neumusic.player.ui.common.ShadeDialog
 import com.neumusic.player.ui.common.ShadeDialogRow
 import com.neumusic.player.ui.common.toastMain
 import com.neumusic.player.ui.common.HorizontalShadeSlider
+import com.neumusic.player.ui.common.ShadeSwitch
 import com.neumusic.player.ui.home.DetailTopBar
 
 /**
@@ -389,20 +390,14 @@ fun EqualizerScreen(onBack: () -> Unit) {
     }
 }
 
-/** 凸起卡内的开关行：启用=凹陷，停用=平（凸起中以凹陷表选中）。 */
+/** 凸起卡内的开关行：右侧是新拟物开关（凹陷轨道 + 凸起滑块，用户 2026-10-01 规格）。 */
 @Composable
 private fun ToggleRow(label: String, on: Boolean, onTap: () -> Unit) {
     val colors = LocalShadeColors.current
     Row(
         Modifier
             .fillMaxWidth()
-            .height(46.dp)
-            .then(
-                if (on) Modifier.shadeInset(cornerRadius = 16.dp, offset = 3.dp, blur = 5.dp)
-                else Modifier
-            )
-            .flatTap(onTap)
-            .padding(horizontal = 16.dp),
+            .padding(vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -412,12 +407,7 @@ private fun ToggleRow(label: String, on: Boolean, onTap: () -> Unit) {
             fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
             modifier = Modifier.weight(1f),
         )
-        Text(
-            if (on) "开" else "关",
-            fontSize = 13.sp,
-            color = if (on) colors.accent else colors.textTertiary,
-            fontWeight = FontWeight.Medium,
-        )
+        ShadeSwitch(checked = on, onCheckedChange = { onTap() })
     }
 }
 

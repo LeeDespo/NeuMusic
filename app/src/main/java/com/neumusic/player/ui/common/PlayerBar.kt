@@ -65,7 +65,6 @@ import com.neumusic.player.shade.LocalShadeColors
 import com.neumusic.player.shade.flatPressable
 import com.neumusic.player.shade.shadePressable
 import com.neumusic.player.shade.shadeSurface
-import com.neumusic.player.shade.shadeSurfaceTop
 import kotlinx.coroutines.launch
 
 /**
@@ -161,7 +160,10 @@ fun PlayerBar(
         Box(
             Modifier
                 .fillMaxWidth()
-                .shadeSurfaceTop(cornerRadius = 24.dp, offset = 6.dp, blur = 10.dp)
+                // 面板本身**不画阴影、不做圆角**（用户 2026-10-01 规格）：最外围的那圈光影
+                // 会与上方的渐隐条糊在一起，圆角也让它和贴边的底栏格格不入。现在它是
+                // 一块纯底色面板，靠 BottomBarFade 与内容「溶」在一起。
+                .background(colors.background)
                 // 切歌手势：左滑下一首、右滑上一首。按钮的 tap 在拖动超距后自然取消，互不干扰。
                 .pointerInput(Unit) {
                     var total = 0f
@@ -236,17 +238,23 @@ fun PlayerBar(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Box(Modifier.weight(1f)) {
+                        // 歌手：凸起块承接（与歌名块同款），名字过长跑马灯滚动。
+                        // basicMarquee 必须挂在**不被 fillMaxWidth 收紧**的链上——早前是
+                        // fillMaxWidth().flatPressable().basicMarquee()，文本已被外层约束裁到
+                        // 容器宽度，跑马灯无内容可滚（用户报"歌手显示不完整不会滚动"）。
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .shadeSurface(cornerRadius = 12.dp, offset = 3.dp, blur = 5.dp)
+                                .flatPressable(cornerRadius = 12.dp) { openSinger(track.singer) }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                        ) {
                             Text(
                                 track.singer,
                                 fontSize = 12.sp,
                                 color = colors.textSecondary,
                                 maxLines = 1,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .flatPressable(cornerRadius = 10.dp) { openSinger(track.singer) }
-                                    .basicMarquee()
-                                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                                modifier = Modifier.basicMarquee(),
                             )
                         }
                         BarButton(

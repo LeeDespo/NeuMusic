@@ -316,6 +316,11 @@ object Prefs {
         get() = sp.getFloat("lightingMaxOffset", 10f)
         set(v) = sp.edit().putFloat("lightingMaxOffset", v.coerceIn(0f, 40f)).apply()
 
+    /** 光影标定：高光偏移相对暗影偏移的倍数（1 = 对称等长反向，0 = 高光不偏移）。 */
+    var lightingLightRatio: Float
+        get() = sp.getFloat("lightingLightRatio", 1f)
+        set(v) = sp.edit().putFloat("lightingLightRatio", v.coerceIn(0f, 2f)).apply()
+
     /** ExoPlayer 的音频会话 id（PlayerHost 创建播放器后写入，供各音效挂载）。 */
     @Volatile
     var sessionIdForFx: Int = 0

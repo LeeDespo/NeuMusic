@@ -219,9 +219,16 @@ fun AppRoot() {
         label = "playerSlide",
     )
     // 歌手页覆盖层：升起动画与播放页同款（整条底栏同步上移「带出」）。
+    //
+    // 只有「不带 origin」的入口（从播放栏点歌手名进入）才走升起 + 底栏带出；
+    // 带 origin 的是搜索页/主页歌手卡的「飞位」路径，页面是原地淡入的，底栏只做淡出。
+    // 早前这里只看 `top.nav is Nav.Singer`：飞位期间 singerSlide 悄悄升到 1 而底栏的
+    // ride 被写成 0（停在底部），弹栈那一帧 ride 又跳回 singerSlide=1 —— 单帧突跳，
+    // 就是用户报的「返回主页时播放栏一瞬移动到底部再落下来」。
     val singerOpen = top.nav is Nav.Singer
+    val singerRise = singerOpen && top.origin == null
     val singerSlide by animateFloatAsState(
-        targetValue = if (singerOpen) 1f else 0f,
+        targetValue = if (singerRise) 1f else 0f,
         animationSpec = tween(400, easing = FastOutSlowInEasing),
         label = "singerSlide",
     )
