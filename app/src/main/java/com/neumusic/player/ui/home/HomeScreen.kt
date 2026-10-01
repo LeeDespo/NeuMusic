@@ -39,7 +39,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -59,7 +58,6 @@ import coil.compose.AsyncImage
 import com.neumusic.player.data.AlbumItem
 import com.neumusic.player.data.Track
 import com.neumusic.player.data.api.FollowSinger
-import com.neumusic.player.data.api.SongApi
 import com.neumusic.player.data.api.UserApi
 import com.neumusic.player.player.PlayerHost
 import com.neumusic.player.data.PlaylistItem
@@ -566,7 +564,7 @@ private fun AlbumCard(item: AlbumItem, onClick: (Rect) -> Unit) {
  * 主页卡片行：全宽视口 + 两端 contentPadding。
  *
  * 视口**通到屏幕边缘**（卡片能滑到屏幕边再消失），首尾卡片离视口边缘留
- * [EDGE_ROOM]（比阴影位移+模糊略大），阴影就不再被裁 —— 单张卡片时两侧
+ * 留白比阴影位移+模糊略大，阴影就不再被裁 —— 单张卡片时两侧
  * 阴影同样完整。两端再叠一层边缘渐隐，滑出去的卡片优雅淡入背景而非硬切。
  */
 @Composable
@@ -748,4 +746,3 @@ private fun SmallSingerCard(s: FollowSinger, onClick: (Rect) -> Unit) {
     }
 }
 
-private val EDGE_ROOM = 0.dp

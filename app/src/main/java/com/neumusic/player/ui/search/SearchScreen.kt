@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
@@ -69,7 +68,6 @@ import com.neumusic.player.shade.LocalShadeColors
 import com.neumusic.player.shade.flatPressable
 import com.neumusic.player.shade.shadeInset
 import com.neumusic.player.shade.shadePressable
-import com.neumusic.player.ui.common.CollapsingTopBar
 import com.neumusic.player.ui.common.TopEdgeFade
 import com.neumusic.player.ui.common.cardGridItems
 import com.neumusic.player.ui.common.gridColumns
@@ -86,7 +84,6 @@ import com.neumusic.player.ui.common.TrackMoreDialog
 import com.neumusic.player.ui.common.doubleTapToTop
 import com.neumusic.player.ui.common.playQueue
 import com.neumusic.player.ui.common.rememberSelectionBusSync
-import com.neumusic.player.ui.common.rememberTopBarVisible
 import com.neumusic.player.ui.common.toggleLike
 import kotlinx.coroutines.launch
 import com.neumusic.player.data.SearchHistoryStore
@@ -106,7 +103,6 @@ fun SearchScreen(
     val scope = rememberCoroutineScope()
     val colors = LocalShadeColors.current
     val listState = rememberLazyListState()
-    val barVisible = rememberTopBarVisible(listState)
     val likedIds by LikedStore.liked.collectAsState()
     val downloadedMap by DownloadStore.records.collectAsState()
     val screenWidth = LocalConfiguration.current.screenWidthDp.dp

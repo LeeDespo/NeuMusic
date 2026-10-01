@@ -50,7 +50,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -121,11 +120,6 @@ fun PlayerBar(
     val playing by PlayerHost.isPlaying.collectAsState()
     val likedIds by LikedStore.liked.collectAsState()
     val vizOn by Prefs.barVizFlow.collectAsState()
-    // FFT（Visualizer）优先；模拟器等不支持时回退 PCM 分段电平
-    val usingFft by VizHost.usingFft.collectAsState()
-    val fftLevels by VizHost.levels.collectAsState()
-    val pcmLevels by PlayerHost.vizProcessor.levels.collectAsState()
-    val levels = if (usingFft) fftLevels else pcmLevels
     val liked = track.songId > 0L && track.songId in likedIds
     var showQueue by remember { mutableStateOf(false) }
 
@@ -209,7 +203,7 @@ fun PlayerBar(
             ) {
                 // 封面：跨两行
                 if (vizOn) {
-                    CircularCoverViz(track.coverUrl, playing, levels, Modifier.tap(onOpen))
+                    CircularCoverViz(track.coverUrl, playing, Modifier.tap(onOpen))
                 } else {
                     Box(Modifier.tap(onOpen)) {
                         AlbumArt(track.coverUrl, 84.dp, corner = 20.dp, plate = true)
@@ -317,8 +311,13 @@ private fun BarButton(icon: ImageVector, desc: String, tint: Color, onClick: () 
  * 频段数与播放详情页的频谱环一致（[VIZ_BARS] 根，从 [VizHost.BARS] 段降采样映射）。
  */
 @Composable
-private fun CircularCoverViz(url: String, playing: Boolean, levels: FloatArray, modifier: Modifier = Modifier) {
+private fun CircularCoverViz(url: String, playing: Boolean, modifier: Modifier = Modifier) {
     val colors = LocalShadeColors.current
+    // 电平流在此订阅（高频流）：重组被隔离在封面子树，不带动整条播放栏
+    val usingFft by VizHost.usingFft.collectAsState()
+    val fftLevels by VizHost.levels.collectAsState()
+    val pcmLevels by PlayerHost.vizProcessor.levels.collectAsState()
+    val levels = if (usingFft) fftLevels else pcmLevels
     val disc = 66.dp
     val gap = 4.dp
     val maxLen = 8.dp

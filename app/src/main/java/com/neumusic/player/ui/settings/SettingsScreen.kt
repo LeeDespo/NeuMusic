@@ -20,9 +20,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.border
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FileDownload
@@ -106,12 +104,13 @@ fun SettingsScreen(onBack: () -> Unit) {
         return
     }
 
+    // 顶栏随页面滚动（用户规定）：放进滚动列第一项
     Column(Modifier.fillMaxSize()) {
-        DetailTopBar("设置", onBack)
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp).imePadding(),
+                .imePadding(),
         ) {
+            DetailTopBar("设置", onBack, horizontalPadding = 16.dp)
             // ── 账号 ──
             SectionTitle("账号")
             Column(

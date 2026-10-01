@@ -1,6 +1,5 @@
 package com.neumusic.player.ui.player
 
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -10,7 +9,6 @@ import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -55,10 +53,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.neumusic.player.data.Lyrics
 import com.neumusic.player.data.PlayMode
 import com.neumusic.player.data.Prefs
 import com.neumusic.player.data.api.SongApi
@@ -68,7 +64,6 @@ import com.neumusic.player.shade.LocalShadeColors
 import com.neumusic.player.shade.shadeInset
 import com.neumusic.player.shade.shadeSurface
 import com.neumusic.player.shade.shadePressable
-import com.neumusic.player.ui.common.AlbumArt
 import com.neumusic.player.ui.common.QueueDialog
 import com.neumusic.player.ui.common.VIZ_BARS
 import com.neumusic.player.ui.common.toastMain
@@ -119,12 +114,8 @@ fun PlayerScreen(onBack: () -> Unit, onOpenEqualizer: () -> Unit = {}) {
     val liked by PlayerHost.liked.collectAsState()
     val lyrics by PlayerHost.lyrics.collectAsState()
 
-    // 可视化电平：FFT（Visualizer）优先；模拟器等无实现时回退 PCM 电平。
-    // 之前 CoverDisc 只订阅 VizHost.levels，回退场景下恒为零（"频谱环没效果"的原因）。
-    val usingFft by VizHost.usingFft.collectAsState()
-    val fftLevels by VizHost.levels.collectAsState()
-    val pcmLevels by PlayerHost.vizProcessor.levels.collectAsState()
-    val vizLevels = if (usingFft) fftLevels else pcmLevels
+    // 可视化电平改由 CoverDisc 内部订阅（2026-10-01 性能审计）：电平流每次音频块都发射
+    // （约 20-50ms 一次），若在页顶层 collect 会带动整页高频重组（歌词/控制区全部陪跑）。
     val lyricSize by Prefs.lyricSizeFlow.collectAsState()
     val transPref by Prefs.lyricTransFlow.collectAsState()
     // 本地副本，便于页面上的按钮即时切换（同时写回设置）。
@@ -245,7 +236,6 @@ fun PlayerScreen(onBack: () -> Unit, onOpenEqualizer: () -> Unit = {}) {
                     singer = track?.singer.orEmpty(),
                     coverUrl = track?.coverUrl.orEmpty(),
                     playing = playing,
-                    levels = vizLevels,
                 )
             }
             // 歌词面板：0→1 从底部升起并长到三行迷你（带翻译/注音位）；1→2 长到全屏
@@ -487,7 +477,6 @@ private fun CoverPage(
     singer: String,
     coverUrl: String,
     playing: Boolean,
-    levels: FloatArray,
 ) {
     val colors = LocalShadeColors.current
     Column(
@@ -499,7 +488,6 @@ private fun CoverPage(
             coverUrl = coverUrl,
             frac = 0f,
             playing = playing,
-            levels = levels,
             onDragStart = {},
             onDrag = {},
             onDragEnd = {},
@@ -541,7 +529,6 @@ private fun CoverDisc(
     coverUrl: String,
     frac: Float,
     playing: Boolean,
-    levels: FloatArray,
     onDragStart: () -> Unit,
     onDrag: (Float) -> Unit,
     onDragEnd: () -> Unit,
@@ -550,6 +537,11 @@ private fun CoverDisc(
     val animatedFrac by animateFloatAsState(frac, tween(160), label = "ringFrac")
     val ringMaxLen = RING_MAX_LEN
     val vinyl by Prefs.vinylModeFlow.collectAsState()
+    // 电平流在此订阅（而不是页面顶层）：高频重组被隔离在圆盘子树内
+    val usingFft by VizHost.usingFft.collectAsState()
+    val fftLevels by VizHost.levels.collectAsState()
+    val pcmLevels by PlayerHost.vizProcessor.levels.collectAsState()
+    val levels = if (usingFft) fftLevels else pcmLevels
 
     // 自转：**只有黑胶模式开启且在播放时**才转（用户规格：关闭黑胶就是不转的普通圆盘）。
     // 暂停时停在当前角度。

@@ -50,7 +50,6 @@ import com.neumusic.player.data.AlbumItem
 import com.neumusic.player.data.DownloadStore
 import com.neumusic.player.data.LikedStore
 import com.neumusic.player.data.Track
-import com.neumusic.player.data.api.PlaylistApi
 import com.neumusic.player.data.api.SingerApi
 import com.neumusic.player.player.PlayerHost
 import com.neumusic.player.shade.BlockSlice

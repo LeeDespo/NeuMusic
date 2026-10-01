@@ -33,6 +33,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
@@ -41,10 +42,8 @@ import com.neumusic.player.data.AlbumItem
 import com.neumusic.player.data.Downloader
 import com.neumusic.player.data.LikedStore
 import com.neumusic.player.data.PlaylistItem
-import com.neumusic.player.data.Prefs
 import com.neumusic.player.data.Track
 import com.neumusic.player.data.api.PlaylistApi
-import com.neumusic.player.data.api.RadioApi
 import com.neumusic.player.shade.LocalShadeColors
 import com.neumusic.player.shade.flatPressable
 import com.neumusic.player.shade.shadePressable
@@ -61,7 +60,6 @@ import com.neumusic.player.ui.common.toastMain
 import com.neumusic.player.ui.common.toggleLike
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.derivedStateOf
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
@@ -73,7 +71,6 @@ import com.neumusic.player.ui.common.TrackFormatsDialog
 import com.neumusic.player.ui.common.TrackInfoDialog
 import com.neumusic.player.ui.common.TrackMoreDialog
 import com.neumusic.player.ui.common.rememberSelectionBusSync
-import com.neumusic.player.shade.shadeSurface
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -83,12 +80,16 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 
-/** 二级页通用顶栏：凸起返回按钮 + 标题。不随滚动隐藏（详情页短，无必要）。 */
+/**
+ * 二级页通用顶栏：凸起返回按钮 + 标题。
+ * **顶栏随页面滚动**（用户规定）：调用方必须把它放进滚动容器的第一项，
+ * 不允许固定悬浮在滚动区外。
+ */
 @Composable
-fun DetailTopBar(title: String, onBack: () -> Unit) {
+fun DetailTopBar(title: String, onBack: () -> Unit, horizontalPadding: Dp = 16.dp) {
     val colors = LocalShadeColors.current
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+        Modifier.fillMaxWidth().padding(horizontal = horizontalPadding, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {

@@ -7,11 +7,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
@@ -28,11 +25,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.Canvas
@@ -51,10 +46,8 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.neumusic.player.data.Prefs
 import com.neumusic.player.data.AccentMode
 import com.neumusic.player.data.ThemeMode
@@ -469,79 +462,4 @@ fun Modifier.flatPressable(
                 },
             )
         }
-}
-
-// ───────────────────────── 路径式标签栏（选中标签与下方列表融合） ─────────────────────────
-
-/**
- * 融合式标签栏容器：整体是一块凸起面，标签行位于其顶部。
- * 标签行与内容之间画一道浅槽作为分隔，**但选中标签的宽度范围内不画**，
- * 于是选中的标签与下方列表连成一整块（参考设计图 sample_1 / ShadeCraft ShadeTabPathBar）。
- *
- * 用法：把标签标题行与列表内容一起传进 [content]，布局需保证标签行高度 = [tabHeight]。
- */
-@Composable
-fun ShadeFusedTabs(
-    tabCount: Int,
-    selectedIndex: Int,
-    modifier: Modifier = Modifier,
-    tabHeight: Dp = 52.dp,
-    cornerRadius: Dp = 22.dp,
-    offset: Dp = 6.dp,
-    blur: Dp = 10.dp,
-    content: @Composable () -> Unit,
-) {
-    val colors = LocalShadeColors.current
-    Box(
-        modifier
-            .shadeSurface(cornerRadius = cornerRadius, offset = offset, blur = blur)
-            .drawWithContent {
-                drawContent()
-                // 标签行与内容之间的浅槽，在选中标签宽度内断开，使二者连成一块。
-                val y = tabHeight.toPx()
-                val tabW = size.width / tabCount
-                val gapStart = selectedIndex * tabW
-                val gapEnd = gapStart + tabW
-                val inset = cornerRadius.toPx() * 0.6f
-                val groove = nativePaint(colors.shadowDark, 0.5f, 0f)
-                drawIntoCanvas { c ->
-                    val nc = c.nativeCanvas
-                    // 左侧段：inset → gapStart
-                    if (gapStart > inset) nc.drawLine(inset, y, gapStart, y, groove)
-                    // 右侧段：gapEnd → 右内边
-                    if (size.width - inset > gapEnd) nc.drawLine(gapEnd, y, size.width - inset, y, groove)
-                }
-            }
-    ) {
-        content()
-    }
-}
-
-/** 单个标签标题。选中时用 accent 色加粗，配合容器缺口形成「长进内容」的效果。 */
-@Composable
-fun ShadeFusedTab(label: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    val colors = LocalShadeColors.current
-    val haptic = LocalHapticFeedback.current
-    Box(
-        modifier
-            .fillMaxHeight()
-            .pointerInput(label, selected) {
-                detectTapGestures(
-                    onTap = {
-                        if (!selected) {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onClick()
-                        }
-                    },
-                )
-            },
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            label,
-            color = if (selected) colors.accent else colors.textTertiary,
-            fontSize = if (selected) 15.sp else 14.sp,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-        )
-    }
 }
