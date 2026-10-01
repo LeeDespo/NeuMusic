@@ -394,13 +394,18 @@ fun Modifier.blockSlice(
             }
             val r = CornerRadius(corner, corner)
             val z = CornerRadius.Zero
+            // 相邻行的填充**纵向各让 1px 重叠**：两块抗锯齿的矩形严丝合缝相接时，
+            // 交界那一列像素的覆盖率之和 < 1，会漏出底下的阴影色——就是用户报的
+            // 「光影在每一行间发生断裂」（整块渲染的搜索页没有这个问题，正是因为它没有行缝）。
+            // 重叠的是同色填充，看不出来；圆角端不动（Head 只延下边、Tail 只延上边）。
+            val ov = 1.dp.toPx()
             val fill = Path().apply {
                 addRoundRect(
                     when (position) {
-                        BlockSlice.Head -> RoundRect(androidx.compose.ui.geometry.Rect(0f, 0f, w, h), topLeft = r, topRight = r, bottomRight = z, bottomLeft = z)
-                        BlockSlice.Tail -> RoundRect(androidx.compose.ui.geometry.Rect(0f, 0f, w, h), topLeft = z, topRight = z, bottomRight = r, bottomLeft = r)
+                        BlockSlice.Head -> RoundRect(0f, 0f, w, h + ov, topLeftCornerRadius = r, topRightCornerRadius = r)
+                        BlockSlice.Tail -> RoundRect(0f, -ov, w, h, bottomRightCornerRadius = r, bottomLeftCornerRadius = r)
                         BlockSlice.Single -> RoundRect(0f, 0f, w, h, r)
-                        BlockSlice.Middle -> RoundRect(0f, 0f, w, h, z)
+                        BlockSlice.Middle -> RoundRect(0f, -ov, w, h + ov)
                     }
                 )
             }

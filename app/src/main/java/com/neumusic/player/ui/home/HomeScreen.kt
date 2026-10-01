@@ -70,6 +70,8 @@ import com.neumusic.player.shade.LocalShadeColors
 import com.neumusic.player.shade.shadeInset
 import com.neumusic.player.shade.shadePressable
 import com.neumusic.player.shade.shadeSurface
+import com.neumusic.player.ui.common.TopEdgeFade
+import com.neumusic.player.ui.common.rememberTopContentInset
 import com.neumusic.player.ui.common.rememberPlayerBarSpace
 import com.neumusic.player.ui.common.AlbumArt
 import com.neumusic.player.ui.common.CoverPlaceholder
@@ -123,6 +125,7 @@ fun HomeScreen(
     onOpenSettings: () -> Unit,
     onOpenDest: (NavRequest) -> Unit,
 ) {
+    val topInset = rememberTopContentInset()
     val barSpace = rememberPlayerBarSpace()
     val colors = LocalShadeColors.current
     val ctx = LocalContext.current
@@ -251,7 +254,7 @@ fun HomeScreen(
         modifier = Modifier.fillMaxSize().background(colors.background).doubleTapToTop(listState),
         // 左右只留 2dp：卡片行的"留白 + 阴影空间"由 [HomeCardRow] 自管（全宽视口），
         // 否则首尾卡片的阴影会被行视口裁掉（用户反馈的"第一张左侧/最后一张右侧截断"）。
-        contentPadding = PaddingValues(start = 2.dp, end = 2.dp, top = 12.dp, bottom = barSpace),
+        contentPadding = PaddingValues(start = 2.dp, end = 2.dp, top = topInset + 12.dp, bottom = barSpace),
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         item { GreetingHeader(greeting, onOpenSearch, onOpenSettings) }
@@ -373,7 +376,9 @@ fun HomeScreen(
 
         item { Spacer(Modifier.height(4.dp)) }
     }
-    VerticalEdgeFades(state = listState, height = 26.dp)
+        // 顶部渐隐：内容从状态栏底下滚过时先溶进底色（与搜索/歌手页同一条线）
+        if (listState.canScrollBackward) TopEdgeFade()
+        VerticalEdgeFades(state = listState, height = 26.dp, top = false)
     }
 
     error?.let { msg ->
@@ -595,10 +600,10 @@ private fun HomeCardRow(
 }
 
 /**
- * 推荐歌曲卡（主页顶部，用户 2026-10-01 二次规格）：**整块大圆角凸起承载卡**，
- * 四个元素自上而下、方方正正地排好：
- * 封面画框（居中）→ 歌名 + 歌手（居中、跑马灯）→ 歌曲详情框（凸起卡里的凹陷槽、
- * 撑大过、文字超出可滚）→ 三个动作钮（居中一行）+ 来源小字。
+ * 推荐歌曲卡（主页顶部，用户 2026-10-01 三次规格）：整块大圆角凸起承载卡，
+ * **两列两行**的方正排布——
+ * 左上 = 封面画框（占地最大，点封面 = 播放/暂停）；左下 = 歌名 + 歌手两行（超长跑马灯）；
+ * 右上 = 歌曲详情（凹陷槽，**大小固定**、不随字数变化，文字超出可滚）；右下 = 三个动作钮。
  */
 @Composable
 private fun RecommendCard(
@@ -611,6 +616,7 @@ private fun RecommendCard(
 ) {
     val colors = LocalShadeColors.current
     val track = entry.track
+    val cover = 158.dp
     Column(
         Modifier
             .fillMaxWidth()
@@ -620,62 +626,75 @@ private fun RecommendCard(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        // 1) 封面画框（容器级凸起面板上的独立控件）；点封面 = 播放/暂停
-        Box(Modifier.cardTap { onPlayPause() }) {
-            AlbumArt(track.coverUrl, 164.dp, corner = 22.dp, plate = true)
-        }
-        // 2) 歌名 + 歌手（居中、跑马灯）
-        Text(
-            track.name,
-            color = colors.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            modifier = Modifier.fillMaxWidth().basicMarquee(),
-        )
-        if (track.singer.isNotEmpty()) {
-            Text(
-                track.singer,
-                color = colors.textSecondary, fontSize = 11.sp,
-                maxLines = 1,
-                modifier = Modifier.fillMaxWidth().basicMarquee(),
-            )
-        }
-        // 3) 歌曲详情框：凹陷槽（凸起容器内表槽位），固定高度、文字超出可滚
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(150.dp)
-                .shadeInset(cornerRadius = 14.dp, offset = 3.dp, blur = 5.dp)
-                .padding(horizontal = 10.dp),
-        ) {
-            Text(
-                entry.intro.ifEmpty { "该歌曲暂无歌曲详情" },
-                color = colors.textSecondary, fontSize = 11.sp, lineHeight = 16.sp,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clipToBounds()
-                    .verticalScroll(rememberScrollState())
-                    .padding(vertical = 8.dp),
-            )
-        }
-        // 4) 三个动作钮（居中一行）+ 来源小字
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            RecBtn(
-                if (playingThis) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                if (playingThis) "暂停" else "播放", colors.accent,
-            ) { onPlayPause() }
-            RecBtn(
-                if (liked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                if (liked) "取消喜欢" else "喜欢",
-                if (liked) colors.accent else colors.textSecondary,
-            ) { onLike() }
-            RecBtn(Icons.Filled.Refresh, "刷新推荐", colors.textSecondary) { onRefresh() }
+        Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Top) {
+            // 左列：封面（上）+ 歌名/歌手（下）
+            Column(
+                Modifier.width(cover),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Box(Modifier.cardTap { onPlayPause() }) {
+                    AlbumArt(track.coverUrl, cover, corner = 22.dp, plate = true)
+                }
+                Text(
+                    track.name,
+                    color = colors.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    modifier = Modifier.fillMaxWidth().basicMarquee(),
+                )
+                if (track.singer.isNotEmpty()) {
+                    Text(
+                        track.singer,
+                        color = colors.textSecondary, fontSize = 11.sp,
+                        maxLines = 1,
+                        modifier = Modifier.fillMaxWidth().basicMarquee(),
+                    )
+                }
+            }
+            // 右列：详情（上，大小固定）+ 三个动作钮（下）
+            Column(
+                Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                // 与封面同高：字数多少都不改变大小；超出在槽内滚动
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(cover)
+                        .shadeInset(cornerRadius = 14.dp, offset = 3.dp, blur = 5.dp)
+                        .padding(horizontal = 10.dp),
+                ) {
+                    Text(
+                        entry.intro.ifEmpty { "该歌曲暂无歌曲详情" },
+                        color = colors.textSecondary, fontSize = 11.sp, lineHeight = 16.sp,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clipToBounds()
+                            .verticalScroll(rememberScrollState())
+                            .padding(vertical = 8.dp),
+                    )
+                }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    RecBtn(
+                        if (playingThis) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                        if (playingThis) "暂停" else "播放", colors.accent,
+                    ) { onPlayPause() }
+                    RecBtn(
+                        if (liked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                        if (liked) "取消喜欢" else "喜欢",
+                        if (liked) colors.accent else colors.textSecondary,
+                    ) { onLike() }
+                    RecBtn(Icons.Filled.Refresh, "刷新推荐", colors.textSecondary) { onRefresh() }
+                }
+            }
         }
         Text("来自猜你喜欢", color = colors.textTertiary, fontSize = 10.sp)
     }
 }
+
 
 @Composable
 private fun RecBtn(

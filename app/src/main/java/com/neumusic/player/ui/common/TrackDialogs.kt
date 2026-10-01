@@ -1,5 +1,6 @@
 package com.neumusic.player.ui.common
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -24,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -34,6 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import kotlinx.coroutines.launch
 import com.neumusic.player.data.Track
 import com.neumusic.player.shade.LocalShadeColors
 import com.neumusic.player.shade.flatPressable
@@ -55,13 +58,20 @@ fun ShadeDialog(
     content: @Composable () -> Unit,
 ) {
     val colors = LocalShadeColors.current
+    val scope = rememberCoroutineScope()
     var shown by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { shown = true }
-    val t by animateFloatAsState(
-        if (shown) 1f else 0f,
-        tween(240, easing = FastOutSlowInEasing),
-        label = "dialogIn",
-    )
+    // 关闭也要有动画（用户 2026-10-01）：先倒放一遍进场动画，再真正通知调用方关闭。
+    // 用 Animatable 而不是 animateFloatAsState——后者无法在动画播完后才执行动作。
+    val appear = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { appear.animateTo(1f, tween(240, easing = FastOutSlowInEasing)) }
+    val t = appear.value
+    fun close() {
+        if (appear.value < 1f) return          // 进场还没走完，忽略
+        scope.launch {
+            appear.animateTo(0f, tween(200, easing = FastOutSlowInEasing))
+            onDismiss()
+        }
+    }
     Box(
         Modifier
             .fillMaxSize()
@@ -83,7 +93,7 @@ fun ShadeDialog(
                 Box(
                     Modifier
                         .size(42.dp)
-                        .shadePressable(cornerRadius = 21.dp, offset = 4.dp, blur = 6.dp, onClick = onDismiss),
+                        .shadePressable(cornerRadius = 21.dp, offset = 4.dp, blur = 6.dp, onClick = { close() }),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(

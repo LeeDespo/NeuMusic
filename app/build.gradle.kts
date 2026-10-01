@@ -11,7 +11,7 @@ android {
     defaultConfig {
         applicationId = "com.neumusic.player"
         minSdk = 26
-        targetSdk = 34
+        targetSdk = 35   // Android 15+ 只有 targetSdk>=35 才真正边到边（否则系统强加状态栏色块）
         versionCode = 1
         versionName = "0.1.0"
 
@@ -41,6 +41,14 @@ android {
     }
 }
 
+// media3-session 会拉进 kotlin-stdlib 2.2.10，而本工程编译器是 Kotlin 2.0.21
+// （metadata 版本不兼容，直接编译失败）。把 stdlib 钉回编译器同版本。
+configurations.all {
+    resolutionStrategy {
+        force("org.jetbrains.kotlin:kotlin-stdlib:2.0.21")
+    }
+}
+
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("androidx.compose.material3:material3")
@@ -57,4 +65,6 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("io.coil-kt:coil-compose:2.5.0")
     implementation("androidx.media3:media3-exoplayer:1.11.1")
+    // 前台播放服务（mediaPlayback 类型）+ 媒体通知/锁屏控制
+    implementation("androidx.media3:media3-session:1.11.1")
 }

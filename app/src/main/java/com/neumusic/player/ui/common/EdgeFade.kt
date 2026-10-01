@@ -82,7 +82,7 @@ fun BoxScope.HorizontalEdgeFades(
 @Composable
 fun BoxScope.TopEdgeFade(
     extraHeight: Dp = 48.dp,
-    belowStatusBar: Dp = 8.dp,
+    belowStatusBar: Dp = TOP_FADE_BELOW_STATUS_BAR,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalShadeColors.current
@@ -145,4 +145,19 @@ fun BoxScope.VerticalEdgeFades(
                 ),
         )
     }
+}
+
+/** 「彻底消失线」比状态栏下缘再低这么多（[TopEdgeFade] 与各页内容顶部内缩共用）。 */
+val TOP_FADE_BELOW_STATUS_BAR: Dp = 8.dp
+
+/**
+ * 滚动内容在**静止时**应该从哪开始：状态栏下缘再低一点点（与 [TopEdgeFade] 的消失线对齐）。
+ *
+ * 页面层不再统一加 statusBarsPadding（那会让内容永远进不到状态栏底下、渐隐线整体偏低），
+ * 改由各页把它加进 contentPadding / 首项内缩——内容照样能从状态栏底下滚过去（沉浸）。
+ */
+@Composable
+fun rememberTopContentInset(extra: Dp = 0.dp): Dp {
+    val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    return statusTop + TOP_FADE_BELOW_STATUS_BAR + extra
 }

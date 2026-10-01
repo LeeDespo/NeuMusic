@@ -10,6 +10,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.audio.AudioSink
+import androidx.core.net.toUri
 import com.neumusic.player.data.Lyrics
 import com.neumusic.player.data.api.LyricApi
 import com.neumusic.player.data.PlayMode
@@ -28,6 +29,7 @@ import kotlinx.coroutines.launch
  */
 object PlayerHost {
     private var player: ExoPlayer? = null
+    private var mediaSession: androidx.media3.session.MediaSession? = null
     private val main = Handler(Looper.getMainLooper())
 
     /** 播放条可视化的 PCM 数据源（透传处理器，免 RECORD_AUDIO 权限）。 */
@@ -68,6 +70,15 @@ object PlayerHost {
     private val listener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             _isPlaying.value = isPlaying
+            // 播放中必须有一个 mediaPlayback 类型的前台服务，否则系统会在后台
+            // 直接把进程回收（真机实测：后台播放一两分钟自动停）。暂停后不主动停，
+            // 由 MediaSessionService 自己按空闲规则收尾。
+            val t = _current.value
+            if (isPlaying) {
+                if (t != null) PlaybackService.start(requireNotNull(appContext), t.name, t.singer, t.coverUrl, true)
+            } else if (t != null) {
+                PlaybackService.stop(requireNotNull(appContext))
+            }
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
@@ -75,7 +86,18 @@ object PlayerHost {
         }
     }
 
+    private var appContext: Context? = null
+
+    /** 供前台服务使用：确保播放器已创建（必须在主线程调用，服务与 App 同进程）。 */
+    fun ensurePlayer(context: Context) {
+        init(context)
+    }
+
+    /** 供前台服务包装 MediaSession 用（服务不持有所有权，见 PlaybackService）。 */
+    fun exoPlayer(): ExoPlayer? = player
+
     fun init(context: Context) {
+        appContext = context.applicationContext
         if (player != null) return
         main.post {
             val renderersFactory = object : DefaultRenderersFactory(context.applicationContext) {
@@ -93,6 +115,19 @@ object PlayerHost {
             }
             player = ExoPlayer.Builder(context.applicationContext, renderersFactory).build().also {
                 it.addListener(listener)
+                // MediaSession：锁屏/耳机媒体键的控制入口。前台服务只负责「前台身份 + 通知」，
+                // 会话挂在这里（进程内单例），与播放器同生共死。
+                runCatching {
+                    mediaSession = androidx.media3.session.MediaSession.Builder(context.applicationContext, it)
+                        .setSessionActivity(
+                            android.app.PendingIntent.getActivity(
+                                context.applicationContext, 0,
+                                android.content.Intent(context.applicationContext, com.neumusic.player.MainActivity::class.java),
+                                android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT,
+                            )
+                        )
+                        .build()
+                }
                 it.repeatMode = repeatOf(Prefs.playMode)
                 // 均衡器/动态处理挂到播放器的音频会话上（设备不支持时静默降级）。
                 runCatching {
@@ -149,7 +184,7 @@ object PlayerHost {
             if (url == null) {
                 // 异常 message 已是人话（VIP 权限/限流/网络），直接透传。
                 onError(result.exceptionOrNull()?.message ?: "拿不到播放链接（可能限流，请重试）")
-            } else startInternal(url, onError)
+            } else startInternal(track, url, onError)
         }
         // 歌词与播放链接并行拉取，互不阻塞。
         CoroutineScope(Dispatchers.Main).launch {
@@ -161,11 +196,24 @@ object PlayerHost {
         }
     }
 
-    private fun startInternal(url: String, onError: (String) -> Unit) {
+    private fun startInternal(track: Track, url: String, onError: (String) -> Unit) {
         main.post {
             val p = player ?: return@post
             try {
-                p.setMediaItem(MediaItem.fromUri(url))
+                // 带上元数据：前台服务的媒体通知 / 锁屏控件靠它显示歌名歌手封面
+                p.setMediaItem(
+                    MediaItem.Builder()
+                        .setUri(url)
+                        .setMediaId(track.mid)
+                        .setMediaMetadata(
+                            androidx.media3.common.MediaMetadata.Builder()
+                                .setTitle(track.name)
+                                .setArtist(track.singer)
+                                .setArtworkUri(track.coverUrl.takeIf { it.isNotEmpty() }?.toUri())
+                                .build()
+                        )
+                        .build()
+                )
                 p.repeatMode = repeatOf(Prefs.playMode)
                 p.prepare()
                 p.play()
@@ -173,6 +221,11 @@ object PlayerHost {
                 onError(e.message ?: "播放失败")
             }
         }
+    }
+
+    /** 暂停（通知栏「关闭」用）。 */
+    fun pause() {
+        main.post { player?.pause() }
     }
 
     fun toggle() {

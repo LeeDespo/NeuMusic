@@ -74,6 +74,7 @@ import com.neumusic.player.shade.shadePressable
 import com.neumusic.player.shade.shadeSurface
 import com.neumusic.player.ui.common.HorizontalShadeSlider
 import com.neumusic.player.ui.common.SegmentedControl
+import com.neumusic.player.ui.common.TopEdgeFade
 import com.neumusic.player.ui.common.ShadeSwitchRow
 import com.neumusic.player.ui.common.rememberPlayerBarSpace
 import com.neumusic.player.ui.common.toastMain
@@ -126,6 +127,7 @@ fun SettingsScreen(onBack: () -> Unit) {
 
     // 顶栏随页面滚动（用户规定）：放进滚动列第一项
     Column(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize()) {
         Column(
             Modifier.fillMaxSize().verticalScroll(scroll)
                 .imePadding(),
@@ -623,6 +625,8 @@ fun SettingsScreen(onBack: () -> Unit) {
             Spacer(Modifier.height(24.dp + barSpace))   // 底部留白：播放栏实测高度
             }
         }
+            if (scroll.value > 0) TopEdgeFade()
+        }
     }
 }
 
@@ -706,11 +710,20 @@ private fun QualityRow(label: String, selected: Boolean, onClick: () -> Unit) {
 
 @Composable
 private fun SectionTitle(text: String) {
-    Text(
-        text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-        color = LocalShadeColors.current.textSecondary,
-        modifier = Modifier.padding(bottom = 8.dp, start = 4.dp),
-    )
+    // 分区标题坐在自己的凸起小块上（用户 2026-10-01 规格：不要平铺在底色上）
+    val colors = LocalShadeColors.current
+    Box(Modifier.padding(start = 16.dp).padding(bottom = 10.dp)) {
+        Box(
+            Modifier
+                .shadeSurface(cornerRadius = 14.dp, offset = 4.dp, blur = 7.dp)
+                .padding(horizontal = 14.dp, vertical = 7.dp),
+        ) {
+            Text(
+                text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                color = colors.textSecondary,
+            )
+        }
+    }
 }
 
 @Composable

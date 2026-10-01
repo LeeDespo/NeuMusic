@@ -4,6 +4,11 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- 播放条音频可视化：系统 Visualizer API 挂在录音权限组下（不采集麦克风） -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- 后台播放：必须有 mediaPlayback 类型的前台服务，否则系统会在后台回收进程 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- Android 13+ 的媒体通知需要它（不给也能继续放，只是没有通知） -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:allowBackup="true"
@@ -21,5 +26,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 后台播放的前台服务（mediaPlayback 类型是硬要求，否则系统会回收进程） -->
+        <service
+            android:name=".player.PlaybackService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
     </application>
 </manifest>

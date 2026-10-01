@@ -30,6 +30,15 @@ class MainActivity : ComponentActivity() {
         RecommendStore.loadExcluded(this)
         AppLog.init(this)
         SearchHistoryStore.init(this)
+        // Android 13+ 的媒体通知要 POST_NOTIFICATIONS 才能显示（不给也能继续播，
+        // 但前台服务的通知会被隐藏）。这里在启动时请求一次。
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            androidx.core.app.ActivityCompat.requestPermissions(
+                this,
+                arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
+                1001,
+            )
+        }
         setContent {
             // 「光影随时间变化」的时钟：进应用就开始对时（固定光影模式下不读它）。
             LaunchedEffect(Unit) { DayLightHost.runClock() }

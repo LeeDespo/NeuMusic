@@ -382,7 +382,10 @@ fun AppRoot() {
                     }
                 },
         ) {
-            Box(Modifier.fillMaxSize().statusBarsPadding()) {
+            // 页面层**不再**统一 statusBarsPadding：那样内容永远进不到状态栏底下，
+            // 渐隐线会比状态栏低一整个状态栏（用户实测"搜索页的渐隐线明显比别的低"）。
+            // 各页自己把 rememberTopContentInset() 加进 contentPadding / 首项内缩。
+            Box(Modifier.fillMaxSize()) {
                 AnimatedContent(
                     targetState = underNav,
                     transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(140)) },

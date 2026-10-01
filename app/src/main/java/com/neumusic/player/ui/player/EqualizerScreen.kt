@@ -55,6 +55,7 @@ import com.neumusic.player.ui.common.ShadeDialogRow
 import com.neumusic.player.ui.common.toastMain
 import com.neumusic.player.ui.common.HorizontalShadeSlider
 import com.neumusic.player.ui.common.rememberPlayerBarSpace
+import com.neumusic.player.ui.common.TopEdgeFade
 import com.neumusic.player.ui.common.ShadeSwitch
 import com.neumusic.player.ui.home.DetailTopBar
 
@@ -109,8 +110,10 @@ fun EqualizerScreen(onBack: () -> Unit) {
             .navigationBarsPadding(),
     ) {
         // 顶栏随页面滚动（用户规定）：放进滚动列第一项
+        val eqScroll = rememberScrollState()
+        Box(Modifier.fillMaxSize()) {
         Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+            Modifier.fillMaxSize().verticalScroll(eqScroll),
         ) {
             DetailTopBar("音效", onBack, horizontalPadding = 16.dp)
             // ── 开关 ──
@@ -336,6 +339,8 @@ fun EqualizerScreen(onBack: () -> Unit) {
             }
 
             Spacer(Modifier.height(24.dp + barSpace))   // 底部留白：播放栏实测高度
+        }
+            if (eqScroll.value > 0) TopEdgeFade()
         }
     }
 
