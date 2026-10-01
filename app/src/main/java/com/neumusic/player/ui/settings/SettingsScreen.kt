@@ -50,6 +50,7 @@ import com.neumusic.player.data.CredentialInfo
 import com.neumusic.player.data.NicknameCache
 import com.neumusic.player.data.AccentMode
 import com.neumusic.player.data.DownloadDir
+import com.neumusic.player.data.LightingMode
 import com.neumusic.player.data.LyricTextSize
 import com.neumusic.player.data.HomeCache
 import com.neumusic.player.data.LikedStore
@@ -60,10 +61,16 @@ import com.neumusic.player.data.ThemeMode
 import com.neumusic.player.data.api.ApiCache
 import com.neumusic.player.data.api.UserApi
 import com.neumusic.player.shade.LocalShadeColors
+import com.neumusic.player.shade.DayLightHost
+import com.neumusic.player.shade.MAX_OFFSET_RANGE
 import com.neumusic.player.shade.flatPressable
+import com.neumusic.player.shade.formatHour
+import com.neumusic.player.shade.periodName
 import com.neumusic.player.shade.shadeInset
 import com.neumusic.player.shade.shadePressable
 import com.neumusic.player.shade.shadeSurface
+import com.neumusic.player.ui.common.HorizontalShadeSlider
+import com.neumusic.player.ui.common.SegmentedControl
 import com.neumusic.player.ui.common.toastMain
 import com.neumusic.player.ui.home.DetailTopBar
 import kotlinx.coroutines.launch
@@ -298,6 +305,99 @@ fun SettingsScreen(onBack: () -> Unit) {
             }
             Spacer(Modifier.height(18.dp))
 
+            // ── 光影（随时间变化的新拟物光照；模型与曲线见 shade/DayLight.kt）──
+            SectionTitle("光影")
+            Column(
+                Modifier.fillMaxWidth()
+                    .shadeSurface(cornerRadius = 24.dp, offset = 6.dp, blur = 10.dp)
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                val lMode = DayLightHost.mode
+                val lHour = DayLightHost.displayHour()
+                val lx = DayLightHost.preview(colors.isDark)
+                var calibOpen by remember { mutableStateOf(false) }
+
+                // 时间行为：平的分段控制器（选中 = 凹陷圆角矩形，同歌手页）
+                Text(
+                    "时间行为", fontSize = 13.sp, color = colors.textSecondary,
+                    modifier = Modifier.padding(start = 6.dp),
+                )
+                Box(Modifier.padding(start = 6.dp)) {
+                    SegmentedControl(
+                        options = LightingMode.entries.map { it.label },
+                        selected = lMode.ordinal,
+                        onSelect = { DayLightHost.mode = LightingMode.entries[it] },
+                    )
+                }
+                Text(
+                    "「随时间变化」跟着真实时钟走（约半小时一档）；「固定光影」停在下面选定的时刻。",
+                    fontSize = 11.sp, color = colors.textTertiary, modifier = Modifier.padding(8.dp),
+                )
+                Text(
+                    "取哪一套曲线由深色模式决定：浅色主题一直是白天那套、深色主题一直是黑夜那套、" +
+                        "随系统则跟着系统深浅色走。黑夜是固定色温，只有偏移随时间扫过。",
+                    fontSize = 11.sp, color = colors.textTertiary, modifier = Modifier.padding(horizontal = 8.dp),
+                )
+
+                Spacer(Modifier.height(4.dp))
+
+                // 时刻
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("时刻", fontSize = 13.sp, color = colors.textSecondary)
+                    Spacer(Modifier.weight(1f))
+                    Text("${formatHour(lHour)} · ${periodName(lHour)}", fontSize = 12.sp, color = colors.accent)
+                }
+                HorizontalShadeSlider(
+                    progress = lHour / 24f,
+                    onProgress = { DayLightHost.fixedHour = it * 24f },
+                    enabled = lMode == LightingMode.FIXED,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp),
+                )
+                Text(
+                    "色温 %+.2f · 暗影偏移 %+.2f× / %.2f× · 模糊 %.2f× / %.2f× · 强度 %.2f / %.2f".format(
+                        lx.warmth, lx.sx * lx.k, lx.sy * lx.k, lx.blurDark, lx.blurLight, lx.alphaDark, lx.alphaLight,
+                    ),
+                    fontSize = 11.sp, color = colors.textTertiary, modifier = Modifier.padding(8.dp),
+                )
+
+                Spacer(Modifier.height(4.dp))
+
+                // 标定（默认收起）
+                Row(
+                    Modifier.fillMaxWidth()
+                        .flatPressable(cornerRadius = 12.dp) { calibOpen = !calibOpen }
+                        .padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("标定 · 色温三锚点 / 最大偏移", fontSize = 13.sp, color = colors.textSecondary)
+                    Spacer(Modifier.weight(1f))
+                    Text(if (calibOpen) "收起" else "展开", fontSize = 12.sp, color = colors.accent)
+                }
+                if (calibOpen) {
+                    CalibSlider("白天最暖 2000K（日出/日落）", DayLightHost.dayWarm) { DayLightHost.dayWarm = it }
+                    CalibSlider("白天最冷 5500K（正午）", DayLightHost.dayCold) { DayLightHost.dayCold = it }
+                    CalibSlider("黑夜 8000K（月光）", DayLightHost.nightWarm) { DayLightHost.nightWarm = it }
+                    CalibSlider(
+                        "最大偏移", DayLightHost.maxOffset, 0f..MAX_OFFSET_RANGE,
+                        text = "%.1f dp".format(DayLightHost.maxOffset),
+                    ) { DayLightHost.maxOffset = it }
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                        Text(
+                            "恢复默认",
+                            fontSize = 12.sp, color = colors.accent,
+                            modifier = Modifier
+                                .flatPressable(cornerRadius = 12.dp) { DayLightHost.resetCalib() }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(18.dp))
+
             // ── 下载 ──
             SectionTitle("下载")
             Column(
@@ -335,9 +435,17 @@ fun SettingsScreen(onBack: () -> Unit) {
                     "取不到所选音质时自动降级；无损/母带需对应会员权益。下载完成后曲目在列表里显示为已下载（灰色）。",
                     fontSize = 11.sp, color = colors.textTertiary, modifier = Modifier.padding(8.dp),
                 )
+            }
+            Spacer(Modifier.height(18.dp))
 
-                Spacer(Modifier.height(4.dp))
-
+            // ── 播放栏与播放页（原本混在「下载」区里，2026-10-01 分区整理独立出来）──
+            SectionTitle("播放栏与播放页")
+            Column(
+                Modifier.fillMaxWidth()
+                    .shadeSurface(cornerRadius = 24.dp, offset = 6.dp, blur = 10.dp)
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
                 // 播放条音频可视化
                 Text(
                     "播放栏", fontSize = 13.sp, color = colors.textSecondary,
@@ -466,6 +574,33 @@ fun SettingsScreen(onBack: () -> Unit) {
             }
             Spacer(Modifier.height(24.dp))
         }
+    }
+}
+
+/** 光影标定的滑杆行：标签 + 数值 + 新拟物滑杆（色温用 −1..1，偏移用 0..满量程）。 */
+@Composable
+private fun CalibSlider(
+    label: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float> = -1f..1f,
+    text: String = "%+.2f".format(value),
+    onChange: (Float) -> Unit,
+) {
+    val colors = LocalShadeColors.current
+    val span = range.endInclusive - range.start
+    Column(Modifier.fillMaxWidth().padding(horizontal = 6.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(label, fontSize = 12.sp, color = colors.textSecondary)
+            Spacer(Modifier.weight(1f))
+            Text(text, fontSize = 12.sp, color = colors.accent)
+        }
+        Spacer(Modifier.height(4.dp))
+        HorizontalShadeSlider(
+            progress = ((value - range.start) / span).coerceIn(0f, 1f),
+            onProgress = { onChange(range.start + it * span) },
+            enabled = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 

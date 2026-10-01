@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import com.neumusic.player.data.Prefs
 import com.neumusic.player.data.AccentMode
 import com.neumusic.player.data.ThemeMode
+import kotlin.math.abs
 
 // ───────────────────────── 色板（源自 ShadeCraft ConstantColor） ─────────────────────────
 
@@ -171,7 +172,11 @@ private fun drawOffsetPath(
 
 /**
  * 统一阴影绘制。绘制顺序：凸起外阴影 → 背景圆角矩形 → 凹陷内阴影。
- * 光源固定左上：凸起时亮影偏左上/暗影偏右下；凹陷时暗内影在左上内缘、亮内影在右下内缘。
+ *
+ * 光源方向/长度/强度/色温都由当前 [Lighting] 决定（见 [DayLightHost]）：
+ * 亮影画在 (−dx,−dy)、暗影画在 (+dx,+dy)，凹陷时反过来在内缘。
+ * `offsetPx` / `blurPx` 是**组件自己的标称尺寸**（各调用点传的 dp），
+ * 光照只做按轴缩放，于是小控件与大卡片之间的比例关系不变。
  *
  * @param outerAlpha 凸起外阴影强度（1=全凸）
  * @param innerAlpha 凹陷内阴影强度（1=全凹）
@@ -185,14 +190,22 @@ private fun DrawScope.drawShade(
     innerAlpha: Float,
     innerStrength: Float,
     colors: ShadeColors,
+    light: Lighting,
     offsetPx: Float,
     blurPx: Float,
 ) {
     val path = roundedPath(cornerPx)
+    val dx = offsetPx * light.sx * light.k
+    val dy = offsetPx * light.sy * light.k
+    val blurD = blurPx * light.blurDark
+    val blurL = blurPx * light.blurLight
+    val cLight = tempTint(colors.shadowLight, light.warmth)
+    val cDark = tempTint(colors.shadowDark, light.warmth)
+
     if (outerAlpha > 0.01f) {
         drawIntoCanvas { canvas ->
-            drawOffsetPath(canvas, path, -offsetPx, -offsetPx, nativePaint(colors.shadowLight, outerAlpha, blurPx))
-            drawOffsetPath(canvas, path, offsetPx, offsetPx, nativePaint(colors.shadowDark, outerAlpha, blurPx))
+            drawOffsetPath(canvas, path, -dx, -dy, nativePaint(cLight, outerAlpha * light.alphaLight, blurL))
+            drawOffsetPath(canvas, path, dx, dy, nativePaint(cDark, outerAlpha * light.alphaDark, blurD))
         }
     }
     drawIntoCanvas { canvas ->
@@ -207,10 +220,16 @@ private fun DrawScope.drawShade(
             }
             clipPath(path) {
                 drawIntoCanvas { c ->
-                    val blur = blurPx * innerStrength
-                    val d = offsetPx * 0.9f
-                    drawOffsetPath(c, complement, d, d, nativePaint(colors.shadowDark, innerAlpha * innerStrength, blur))
-                    drawOffsetPath(c, complement, -d, -d, nativePaint(colors.shadowLight, innerAlpha * 0.9f, blur))
+                    val blurInside = innerStrength
+                    val d = 0.9f
+                    drawOffsetPath(
+                        c, complement, dx * d, dy * d,
+                        nativePaint(cDark, innerAlpha * innerStrength * light.alphaDark, blurD * blurInside),
+                    )
+                    drawOffsetPath(
+                        c, complement, -dx * d, -dy * d,
+                        nativePaint(cLight, innerAlpha * 0.9f * light.alphaLight, blurL * blurInside),
+                    )
                 }
             }
         }
@@ -226,7 +245,8 @@ fun Modifier.shadeSurface(cornerRadius: Dp = 20.dp, offset: Dp = 6.dp, blur: Dp 
     return this.drawBehind {
         drawShade(cornerRadius.toPx(), colors.background,
             outerAlpha = shadowAlpha.floatValue.coerceIn(0f, 1f), innerAlpha = 0f, innerStrength = 1f,
-            colors = colors, offsetPx = offset.toPx() * relief, blurPx = blur.toPx() * relief)
+            colors = colors, light = DayLightHost.current(colors.isDark),
+            offsetPx = offset.toPx() * relief, blurPx = blur.toPx() * relief)
     }
 }
 
@@ -239,7 +259,8 @@ fun Modifier.shadeInset(cornerRadius: Dp = 16.dp, offset: Dp = 4.dp, blur: Dp = 
     return this.drawBehind {
         drawShade(cornerRadius.toPx(), colors.background,
             outerAlpha = 0f, innerAlpha = shadowAlpha.floatValue.coerceIn(0f, 1f), innerStrength = 1f,
-            colors = colors, offsetPx = offset.toPx() * relief, blurPx = blur.toPx() * relief)
+            colors = colors, light = DayLightHost.current(colors.isDark),
+            offsetPx = offset.toPx() * relief, blurPx = blur.toPx() * relief)
     }
 }
 
@@ -256,11 +277,18 @@ fun Modifier.shadeSurfaceTop(cornerRadius: Dp = 22.dp, offset: Dp = 6.dp, blur: 
         val off = offset.toPx() * relief
         val blurPx = blur.toPx() * relief
         val a = shadowAlpha.floatValue.coerceIn(0f, 1f)
+        val light = DayLightHost.current(colors.isDark)
+        val dx = off * light.sx * light.k
+        val dy = off * light.sy * light.k
+        val blurD = blurPx * light.blurDark
+        val blurL = blurPx * light.blurLight
+        val cLight = tempTint(colors.shadowLight, light.warmth)
+        val cDark = tempTint(colors.shadowDark, light.warmth)
         if (a > 0.01f) {
             val shadow = roundedPath(cornerRadius.toPx())
             drawIntoCanvas { canvas ->
-                drawOffsetPath(canvas, shadow, -off, -off, nativePaint(colors.shadowLight, a, blurPx))
-                drawOffsetPath(canvas, shadow, off, off, nativePaint(colors.shadowDark, a, blurPx))
+                drawOffsetPath(canvas, shadow, -dx, -dy, nativePaint(cLight, a * light.alphaLight, blurL))
+                drawOffsetPath(canvas, shadow, dx, dy, nativePaint(cDark, a * light.alphaDark, blurD))
             }
         }
         val r = CornerRadius(cornerRadius.toPx(), cornerRadius.toPx())
@@ -307,7 +335,13 @@ fun Modifier.blockSlice(
         val h = size.height
         val off = offset.toPx() * relief
         val blurPx = blur.toPx() * relief
-        val ext = blurPx * 2.5f + off + 2.dp.toPx()   // 纵向外延：裁剪窗口内不能出现局部模糊边
+        val light = DayLightHost.current(colors.isDark)
+        val dx = off * light.sx * light.k
+        val dy = off * light.sy * light.k
+        val blurD = blurPx * light.blurDark
+        val blurL = blurPx * light.blurLight
+        // 纵向外延：裁剪窗口内不能出现局部模糊边（取两侧模糊的较大者）
+        val ext = maxOf(blurD, blurL) * 2.5f + maxOf(abs(dx), abs(dy)) + 2.dp.toPx()
         val corner = cornerRadius.toPx()
         val isHead = position == BlockSlice.Head || position == BlockSlice.Single
         val isTail = position == BlockSlice.Tail || position == BlockSlice.Single
@@ -340,8 +374,8 @@ fun Modifier.blockSlice(
                     )
                 }
                 drawIntoCanvas { canvas ->
-                    drawOffsetPath(canvas, lightSlice, -off, -off, nativePaint(colors.shadowLight, a, blurPx))
-                    drawOffsetPath(canvas, darkSlice, off, off, nativePaint(colors.shadowDark, a, blurPx))
+                    drawOffsetPath(canvas, lightSlice, -dx, -dy, nativePaint(tempTint(colors.shadowLight, light.warmth), a * light.alphaLight, blurL))
+                    drawOffsetPath(canvas, darkSlice, dx, dy, nativePaint(tempTint(colors.shadowDark, light.warmth), a * light.alphaDark, blurD))
                 }
             }
             val r = CornerRadius(corner, corner)
@@ -408,6 +442,7 @@ fun Modifier.shadePressable(
                 innerAlpha = innerAlpha * a,
                 innerStrength = 1f + 0.45f * deep,
                 colors = colors,
+                light = DayLightHost.current(colors.isDark),
                 offsetPx = offset.toPx() * relief,
                 blurPx = blur.toPx() * relief,
             )

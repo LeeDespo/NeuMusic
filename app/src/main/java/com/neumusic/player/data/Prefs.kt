@@ -58,6 +58,17 @@ enum class Relief(val label: String, val scale: Float) {
 }
 
 /**
+ * 光影的时间行为：随时间变化（跟着真实时钟走）或固定光影（停在选定的时刻）。
+ *
+ * 注意：**选哪一套曲线（白天/黑夜）由深色模式决定**，不由这两个选项决定——
+ * 浅色主题一直是白天那套、深色主题一直是黑夜那套、随系统则跟着系统深浅色走。
+ */
+enum class LightingMode(val label: String) {
+    TIME("随时间变化"),
+    FIXED("固定光影");
+}
+
+/**
  * 轻量配置存取：登录凭据（uin + musickey + euin）、guid、音质、播放模式、
  * 深色模式、立体感强度。
  *
@@ -271,6 +282,39 @@ object Prefs {
             sp.edit().putBoolean("vinylMode", v).apply()
             vinylModeFlow.value = v
         }
+
+    // ── 光影（随时间变化的新拟物光照，模型见 shade/DayLight.kt）──
+
+    /** 光影的时间行为：随时间变化 / 固定光影。 */
+    var lightingMode: LightingMode
+        get() = LightingMode.entries.firstOrNull { it.name == sp.getString("lightingMode", null) }
+            ?: LightingMode.FIXED
+        set(v) = sp.edit().putString("lightingMode", v.name).apply()
+
+    /** 固定光影模式下的时刻（0..24，0.5h 对齐）。 */
+    var lightingFixedHour: Float
+        get() = sp.getFloat("lightingFixedHour", 12f)
+        set(v) = sp.edit().putFloat("lightingFixedHour", v.coerceIn(0f, 24f)).apply()
+
+    /** 色温标定：白天最暖（2000K 日出/日落）。 */
+    var lightingDayWarm: Float
+        get() = sp.getFloat("lightingDayWarm", 0.53f)
+        set(v) = sp.edit().putFloat("lightingDayWarm", v.coerceIn(-1f, 1f)).apply()
+
+    /** 色温标定：白天最冷（5500K 正午）。 */
+    var lightingDayCold: Float
+        get() = sp.getFloat("lightingDayCold", -0.23f)
+        set(v) = sp.edit().putFloat("lightingDayCold", v.coerceIn(-1f, 1f)).apply()
+
+    /** 色温标定：黑夜（8000K 月光，整夜恒定）。 */
+    var lightingNightWarm: Float
+        get() = sp.getFloat("lightingNightWarm", -0.78f)
+        set(v) = sp.edit().putFloat("lightingNightWarm", v.coerceIn(-1f, 1f)).apply()
+
+    /** 光影标定：最大偏移（dp，基准 10）。 */
+    var lightingMaxOffset: Float
+        get() = sp.getFloat("lightingMaxOffset", 10f)
+        set(v) = sp.edit().putFloat("lightingMaxOffset", v.coerceIn(0f, 40f)).apply()
 
     /** ExoPlayer 的音频会话 id（PlayerHost 创建播放器后写入，供各音效挂载）。 */
     @Volatile

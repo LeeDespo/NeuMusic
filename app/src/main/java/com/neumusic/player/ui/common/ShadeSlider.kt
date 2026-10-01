@@ -3,7 +3,7 @@ package com.neumusic.player.ui.common
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -57,8 +57,10 @@ fun HorizontalShadeSlider(
             .pointerInput(enabled) {
                 detectTapGestures { offset -> update(offset.x) }
             }
+            // 只用横向拖动：无方向的 detectDragGestures 会把宿主的竖向滚动一并吃掉
+            // （设置页里表现为"想滚页面却把滑杆拖了"，实测踩到）。
             .pointerInput(enabled) {
-                detectDragGestures { change, _ -> update(change.position.x) }
+                detectHorizontalDragGestures { change, _ -> update(change.position.x) }
             },
     ) {
         Box(
