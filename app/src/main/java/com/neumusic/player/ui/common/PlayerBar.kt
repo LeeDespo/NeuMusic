@@ -61,6 +61,8 @@ import com.neumusic.player.data.Track
 import com.neumusic.player.data.api.SingerApi
 import com.neumusic.player.player.PlayerHost
 import com.neumusic.player.player.VizHost
+import androidx.compose.ui.graphics.lerp
+import com.neumusic.player.shade.ShadeColors
 import com.neumusic.player.shade.LocalShadeColors
 import com.neumusic.player.shade.flatPressable
 import com.neumusic.player.shade.shadePressable
@@ -72,20 +74,30 @@ import kotlinx.coroutines.launch
  * 内容滚到底栏跟前先「溶」进底色再被底栏接住，避免硬切。不拦截触摸。
  */
 @Composable
-fun BottomBarFade(height: Dp = 24.dp) {
+fun BottomBarFade(height: Dp = 24.dp, color: Color? = null) {
     val colors = LocalShadeColors.current
+    val end = color ?: barTint(colors)
     Box(
         Modifier
             .fillMaxWidth()
             .height(height)
             .background(
                 Brush.verticalGradient(
-                    0f to colors.background.copy(alpha = 0f),
-                    1f to colors.background,
+                    0f to end.copy(alpha = 0f),
+                    1f to end,
                 )
             ),
     )
 }
+
+/**
+ * 底栏（播放栏/选择底栏）的底色：**不再直接用背景色**——那样面板与页面糊成一片、
+ * 看不出来是一条底栏。浅色主题偏黑灰、深色主题偏灰白，渐隐条与面板共用它，交界才不露痕。
+ */
+@Composable
+fun barTint(colors: ShadeColors): Color =
+    if (colors.isDark) lerp(colors.background, Color.White, 0.09f)
+    else lerp(colors.background, Color.Black, 0.07f)
 
 /** 无裁剪的点击层：给带外阴影的子内容（如凸起画框封面）包点击时不能用 flatPressable——它的 clip 会把阴影裁掉。 */
 private fun Modifier.tap(onClick: () -> Unit): Modifier =
@@ -163,7 +175,7 @@ fun PlayerBar(
                 // 面板本身**不画阴影、不做圆角**（用户 2026-10-01 规格）：最外围的那圈光影
                 // 会与上方的渐隐条糊在一起，圆角也让它和贴边的底栏格格不入。现在它是
                 // 一块纯底色面板，靠 BottomBarFade 与内容「溶」在一起。
-                .background(colors.background)
+                .background(barTint(colors))
                 // 切歌手势：左滑下一首、右滑上一首。按钮的 tap 在拖动超距后自然取消，互不干扰。
                 .pointerInput(Unit) {
                     var total = 0f
@@ -217,10 +229,11 @@ fun PlayerBar(
                 ) {
                     // 第一行：歌名凸起块（大字号，跑马灯）
                     Box(
+                        // 用 shadePressable：按下时凸→凹阴影形变 + 背景微暗 + 触感，
+                        // 与播放栏其它按钮同一种新拟物反馈（原先 shadeSurface+flatPressable 只有背景变暗）。
                         Modifier
                             .fillMaxWidth()
-                            .shadeSurface(cornerRadius = 12.dp, offset = 3.dp, blur = 5.dp)
-                            .flatPressable(cornerRadius = 12.dp, onClick = onOpen)
+                            .shadePressable(cornerRadius = 12.dp, offset = 3.dp, blur = 5.dp, onClick = onOpen)
                             .padding(horizontal = 10.dp, vertical = 6.dp),
                     ) {
                         Text(
@@ -245,8 +258,9 @@ fun PlayerBar(
                         Box(
                             Modifier
                                 .weight(1f)
-                                .shadeSurface(cornerRadius = 12.dp, offset = 3.dp, blur = 5.dp)
-                                .flatPressable(cornerRadius = 12.dp) { openSinger(track.singer) }
+                                .shadePressable(cornerRadius = 12.dp, offset = 3.dp, blur = 5.dp) {
+                                    openSinger(track.singer)
+                                }
                                 .padding(horizontal = 10.dp, vertical = 6.dp),
                         ) {
                             Text(

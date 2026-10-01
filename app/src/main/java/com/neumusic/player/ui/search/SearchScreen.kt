@@ -184,7 +184,10 @@ fun SearchScreen(
             contentPadding = PaddingValues(bottom = barSpace),
         ) {
             item(key = "header") {
-                Column(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp)) {
+                Column(
+                    Modifier.fillMaxWidth().statusBarsPadding()
+                        .padding(horizontal = 16.dp).padding(top = 12.dp),
+                ) {
                     // 顶栏行：返回 + 标题 + 下载（选择模式中变 ✕）
                     Row(
                         Modifier.fillMaxWidth(),

@@ -376,12 +376,17 @@ fun Modifier.blockSlice(
                         }
                     )
                 }
+                // 受光切片的几何**不能照抄暗影**（用户实测"断裂的是高光阴影"）：
+                // 圆角只能出现在**块的真实端点**上。中间行若也带圆角（在 h 处收口 22dp 圆弧），
+                // 圆弧会落进行内，每行都留下一条高光断痕——而暗影切片的中间行是无圆角矩形，
+                // 所以只有高光看得出断裂。中间行改成两端外延的纯矩形，端点才用圆角。
                 val lightSlice = Path().apply {
                     addRoundRect(
                         when {
                             isHead && isTail -> RoundRect(0f, 0f, w, h, topLeftCornerRadius = r, topRightCornerRadius = r, bottomRightCornerRadius = r, bottomLeftCornerRadius = r)
-                            isHead -> RoundRect(0f, 0f, w, h, topLeftCornerRadius = r, topRightCornerRadius = r)
-                            else -> RoundRect(0f, -ext, w, h, bottomLeftCornerRadius = r, bottomRightCornerRadius = r)
+                            isHead -> RoundRect(0f, 0f, w, h + ext, topLeftCornerRadius = r, topRightCornerRadius = r)
+                            isTail -> RoundRect(0f, -ext, w, h, bottomLeftCornerRadius = r, bottomRightCornerRadius = r)
+                            else -> RoundRect(0f, -ext, w, h + ext)
                         }
                     )
                 }

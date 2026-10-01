@@ -691,7 +691,6 @@ private fun RecommendCard(
                 }
             }
         }
-        Text("来自猜你喜欢", color = colors.textTertiary, fontSize = 10.sp)
     }
 }
 

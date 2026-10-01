@@ -48,6 +48,7 @@ import com.neumusic.player.data.api.PlaylistApi
 import com.neumusic.player.shade.LocalShadeColors
 import com.neumusic.player.shade.flatPressable
 import com.neumusic.player.shade.shadePressable
+import com.neumusic.player.ui.common.TOP_FADE_BELOW_STATUS_BAR
 import com.neumusic.player.ui.common.TopEdgeFade
 import com.neumusic.player.ui.common.rememberTopContentInset
 import com.neumusic.player.ui.common.rememberPlayerBarSpace
@@ -143,7 +144,6 @@ fun TrackListScreen(
     /** 「更多 → 查看专辑」的跳转回调。 */
     onOpenAlbum: (Track) -> Unit = {},
 ) {
-    val topInset = rememberTopContentInset()
     val colors = LocalShadeColors.current
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -322,7 +322,7 @@ fun TrackListScreen(
             modifier = Modifier.fillMaxSize().doubleTapToTop(listState),
             contentPadding = PaddingValues(
                 start = 16.dp, end = 16.dp,
-                top = topInset + 8.dp,
+                top = 0.dp,   // 状态栏内缩由顶栏（ListTopBarRow）自己负责，这里不再叠加
                 // 底部留白：让最后一行能滚到播放栏之上，而不是被压住。
                 bottom = 150.dp,
             ),
@@ -572,7 +572,12 @@ private fun ListFooter(
 private fun ListTopBarRow(title: String, onBack: () -> Unit, trailing: (@Composable RowScope.() -> Unit)? = null) {
     val colors = LocalShadeColors.current
     Row(
-        Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 12.dp),
+        // 顶栏自己带状态栏内缩、上下各 12dp —— 与 DetailTopBar 完全一致，
+        // 于是各页的返回键落在同一高度（用户按返回键位置比过）。
+        Modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .padding(top = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
@@ -599,7 +604,6 @@ private fun ListTopBarRow(title: String, onBack: () -> Unit, trailing: (@Composa
 @Composable
 fun PlaylistsScreen(onBack: () -> Unit, onOpen: (PlaylistItem) -> Unit) {
     val barSpace = rememberPlayerBarSpace()
-    val topInset = rememberTopContentInset()
     val colors = LocalShadeColors.current
     val playlistsState = rememberLazyListState()
     var items by remember { mutableStateOf<List<PlaylistItem>?>(null) }
@@ -610,7 +614,7 @@ fun PlaylistsScreen(onBack: () -> Unit, onOpen: (PlaylistItem) -> Unit) {
         Box(Modifier.fillMaxSize()) {
             LazyColumn(
                 state = playlistsState,
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = topInset + 8.dp, bottom = barSpace),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 0.dp, bottom = barSpace),
             ) {
                 item(key = "topbar") { ListTopBarRow("收藏的歌单", onBack) }
                 item {
@@ -637,7 +641,6 @@ fun PlaylistsScreen(onBack: () -> Unit, onOpen: (PlaylistItem) -> Unit) {
 @Composable
 fun AlbumsScreen(onBack: () -> Unit, onOpen: (AlbumItem) -> Unit) {
     val barSpace = rememberPlayerBarSpace()
-    val topInset = rememberTopContentInset()
     val colors = LocalShadeColors.current
     val albumsState = rememberLazyListState()
     var items by remember { mutableStateOf<List<AlbumItem>?>(null) }
@@ -648,7 +651,7 @@ fun AlbumsScreen(onBack: () -> Unit, onOpen: (AlbumItem) -> Unit) {
         Box(Modifier.fillMaxSize()) {
             LazyColumn(
                 state = albumsState,
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = topInset + 8.dp, bottom = barSpace),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 0.dp, bottom = barSpace),
             ) {
                 item(key = "topbar") { ListTopBarRow("收藏的专辑", onBack) }
                 item {
