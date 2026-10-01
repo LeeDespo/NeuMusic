@@ -5,7 +5,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import com.neumusic.player.data.DownloadStore
+import com.neumusic.player.data.AppLog
 import com.neumusic.player.data.HomeCache
+import com.neumusic.player.data.RecommendStore
 import com.neumusic.player.data.SearchHistoryStore
 import com.neumusic.player.data.Prefs
 import com.neumusic.player.player.PlayerHost
@@ -21,6 +23,9 @@ class MainActivity : ComponentActivity() {
         DownloadStore.init(this)
         DownloadStore.initContext(this)
         HomeCache.init(this)
+        RecommendStore.init(this)
+        RecommendStore.loadExcluded(this)
+        AppLog.init(this)
         SearchHistoryStore.init(this)
         setContent {
             ShadeTheme {

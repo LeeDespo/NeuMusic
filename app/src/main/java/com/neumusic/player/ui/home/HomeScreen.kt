@@ -1,6 +1,14 @@
 package com.neumusic.player.ui.home
 
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clipToBounds
+import com.neumusic.player.data.RecommendStore
+import com.neumusic.player.data.AppLog
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,13 +27,19 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -43,6 +57,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.neumusic.player.data.AlbumItem
+import com.neumusic.player.data.Track
+import com.neumusic.player.data.api.FollowSinger
+import com.neumusic.player.data.api.SongApi
+import com.neumusic.player.data.api.UserApi
+import com.neumusic.player.player.PlayerHost
 import com.neumusic.player.data.PlaylistItem
 import com.neumusic.player.data.Prefs
 import com.neumusic.player.data.api.ApiCache
@@ -50,6 +69,7 @@ import com.neumusic.player.data.api.PlaylistApi
 import com.neumusic.player.data.api.RadioApi
 import com.neumusic.player.data.RadioGroup
 import com.neumusic.player.shade.LocalShadeColors
+import com.neumusic.player.shade.shadeInset
 import com.neumusic.player.shade.shadePressable
 import com.neumusic.player.shade.shadeSurface
 import com.neumusic.player.ui.common.AlbumArt
@@ -59,7 +79,12 @@ import kotlinx.coroutines.launch
 import androidx.compose.foundation.lazy.rememberLazyListState
 import com.neumusic.player.data.HomeCache
 import com.neumusic.player.data.LikedStore
+import com.neumusic.player.ui.common.cardTap
+import com.neumusic.player.ui.common.playQueue
+import com.neumusic.player.ui.common.toggleLike
 import com.neumusic.player.ui.common.doubleTapToTop
+import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.ExperimentalFoundationApi
 import com.neumusic.player.ui.common.HorizontalEdgeFades
 import com.neumusic.player.ui.common.VerticalEdgeFades
 import com.neumusic.player.ui.Nav
@@ -112,6 +137,35 @@ fun HomeScreen(
     var radioLoaded by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
+    // ── 推荐歌曲（主页顶部，无标题）：RecommendStore 预缓冲 5 首（曲目+介绍，落盘持久）——
+    // 打开应用推荐即显、刷新即时换歌，都不用等。缓冲不足时后台补货。──
+    val recQueue by RecommendStore.queue.collectAsState()
+    val rec = recQueue.firstOrNull()
+    var recJoiningRadio by remember { mutableStateOf(false) }
+    var followedSingers by remember { mutableStateOf<List<FollowSinger>?>(null) }
+
+    // 点播放 = **接入猜你喜欢的播放**（用推荐歌做首曲，后面跟一批电台曲目作队列），
+    // 而不是把单曲丢进一个一首歌的队列（那样播完循环，用户实测指出）。
+    suspend fun playRecommended(track: Track) {
+        if (recJoiningRadio) return
+        recJoiningRadio = true
+        try {
+            val station = radioGroups.map { it.stations }.flatten()
+                .firstOrNull { st -> st.title == "猜你喜欢" }
+            val queue = if (station != null) {
+                listOf(track) + runCatching {
+                    RadioApi.nextTracks(station.id, firstplay = false, exclude = setOf(track.mid), batches = 4)
+                }.onFailure { AppLog.w("Recommend", "join radio failed", it) }
+                    .getOrDefault(emptyList())
+            } else {
+                listOf(track)
+            }
+            playQueue(ctx, queue, 0)
+        } finally {
+            recJoiningRadio = false
+        }
+    }
+
     LaunchedEffect(Unit) {
         val logged = Prefs.credential != null
 
@@ -154,6 +208,20 @@ fun HomeScreen(
         val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
         greeting = greetingForHour(hour)
 
+        // ── 3.4) 推荐缓冲：电台分组就绪后告诉 store 猜你喜欢的电台 id，后台把缓冲补满 ──
+        val station = radioGroups.map { it.stations }.flatten()
+            .firstOrNull { st -> st.title == "猜你喜欢" }
+        if (station != null) RecommendStore.stationId = station.id
+
+        // ── 3.5) 关注的歌手（需登录 + euin）──
+        scope.launch {
+            followedSingers = if (Prefs.credential?.euin?.isNotEmpty() == true) {
+                runCatching { UserApi.followSingers(0, 30).first }.getOrDefault(emptyList())
+            } else {
+                emptyList()
+            }
+        }
+
         // ── 4) 我喜欢全量刷新与数量（放最后，不跟三栏抢首批请求）──
         scope.launch { LikedStore.refresh() }
         scope.launch {
@@ -165,16 +233,53 @@ fun HomeScreen(
         }
     }
 
+    // 电台分组到位后触发推荐缓冲补货。必须挂页面级 scope：挂在 LaunchedEffect(radioGroups)
+    // 上会被分组数据刷新中途取消（LeftCompositionCancellationException 实测）。
+    LaunchedEffect(radioGroups) {
+        if (radioGroups.isNotEmpty()) {
+            radioGroups.map { it.stations }.flatten()
+                .firstOrNull { st -> st.title == "猜你喜欢" }
+                ?.let { RecommendStore.stationId = it.id }
+            scope.launch { RecommendStore.refill() }
+        }
+    }
+
     Box(Modifier.fillMaxSize()) {
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize().background(colors.background).doubleTapToTop(listState),
         // 左右只留 2dp：卡片行的"留白 + 阴影空间"由 [HomeCardRow] 自管（全宽视口），
         // 否则首尾卡片的阴影会被行视口裁掉（用户反馈的"第一张左侧/最后一张右侧截断"）。
-        contentPadding = PaddingValues(start = 2.dp, end = 2.dp, top = 12.dp, bottom = 132.dp),
+        contentPadding = PaddingValues(start = 2.dp, end = 2.dp, top = 12.dp, bottom = 150.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         item { GreetingHeader(greeting, onOpenSearch, onOpenSettings) }
+
+        // 推荐歌曲（无标题，用户 2026-09-30 规格；缓冲即显）
+        item {
+            val current = rec
+            if (current != null) {
+                val t = current.track
+                val playingThis = PlayerHost.current.value?.mid == t.mid && PlayerHost.isPlaying.value
+                RecommendCard(
+                    entry = current,
+                    liked = LikedStore.liked.value.contains(t.songId),
+                    playingThis = playingThis,
+                    onPlayPause = {
+                        if (PlayerHost.current.value?.mid == t.mid) PlayerHost.toggle()
+                        else scope.launch { playRecommended(t) }
+                    },
+                    onLike = { toggleLike(ctx, t, LikedStore.liked.value.contains(t.songId)) },
+                    onRefresh = {
+                        RecommendStore.advance()
+                        scope.launch {
+                            kotlinx.coroutines.delay(400)
+                            if (RecommendStore.queue.value.size < RecommendStore.CAP) RecommendStore.refill()
+                        }
+                    },
+                )
+            }
+        }
 
         item {
             Section(
@@ -210,6 +315,29 @@ fun HomeScreen(
                 HomeCardRow {
                     items(albums) { a ->
                         AlbumCard(a) { b -> onOpenDest(NavRequest(Nav.AlbumDetail(a.mid, a.name, a.songnum), b)) }
+                    }
+                }
+            }
+        }
+
+        // 关注的歌手（收藏的专辑下面，用户 2026-09-30 规格）：搜索页歌手卡同款设计、缩小一号
+        item {
+            val f = followedSingers
+            Section(
+                title = "关注的歌手",
+                onMore = null,
+                empty = f.isNullOrEmpty(),
+                emptyText = when {
+                    f == null -> "加载中…"
+                    Prefs.credential == null -> "登录后显示"
+                    else -> "还没有关注的歌手"
+                },
+            ) {
+                HomeCardRow(spacing = 12.dp) {
+                    items(f!!) { fs ->
+                        SmallSingerCard(fs) { b ->
+                            onOpenDest(NavRequest(Nav.Singer(fs.mid, fs.name, fs.pic), b))
+                        }
                     }
                 }
             }
@@ -457,6 +585,166 @@ private fun HomeCardRow(
             content = content,
         )
         HorizontalEdgeFades(state = state, width = 20.dp)
+    }
+}
+
+/** 推荐歌曲卡（主页顶部，无标题）：左=画框封面；右=歌名凸起块 + 介绍框（边框凸起、内凹、固定大小、可滚动）+ 竖排三钮。 */
+@Composable
+private fun RecommendCard(
+    entry: RecommendStore.Entry,
+    liked: Boolean,
+    playingThis: Boolean,
+    onPlayPause: () -> Unit,
+    onLike: () -> Unit,
+    onRefresh: () -> Unit,
+) {
+    val colors = LocalShadeColors.current
+    val track = entry.track
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // 封面：凸起画框（左侧）；点封面 = 播放/暂停
+        Box(Modifier.cardTap { onPlayPause() }) {
+            AlbumArt(track.coverUrl, 132.dp, corner = 20.dp, plate = true)
+        }
+        Column(
+            Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            // 歌名凸起块
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .shadeSurface(cornerRadius = 14.dp, offset = 4.dp, blur = 6.dp)
+                    .padding(horizontal = 12.dp, vertical = 9.dp),
+            ) {
+                Text(
+                    track.name,
+                    color = colors.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    modifier = Modifier.fillMaxWidth().basicMarquee(),
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
+                // 介绍框：凸起 + 边框修饰，中间凹陷，固定大小；文字裁剪界线在边框处
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .height(150.dp)
+                        .shadeSurface(cornerRadius = 14.dp, offset = 4.dp, blur = 6.dp)
+                        .border(1.dp, colors.textTertiary.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
+                        .padding(2.dp),
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(11.dp))
+                            .shadeInset(cornerRadius = 11.dp, offset = 2.dp, blur = 4.dp)
+                            .padding(horizontal = 10.dp),
+                    ) {
+                        val text = entry.intro.ifEmpty { "该歌曲暂无歌曲详情" }
+                        Text(
+                            text,
+                            color = colors.textSecondary, fontSize = 11.sp, lineHeight = 16.sp,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clipToBounds()
+                                .verticalScroll(rememberScrollState())
+                                .padding(vertical = 6.dp),
+                        )
+                    }
+                }
+                // 竖排三钮：播放/暂停、喜欢、刷新
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    RecBtn(
+                        if (playingThis) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                        if (playingThis) "暂停" else "播放", colors.accent,
+                    ) { onPlayPause() }
+                    RecBtn(
+                        if (liked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                        if (liked) "取消喜欢" else "喜欢",
+                        if (liked) colors.accent else colors.textSecondary,
+                    ) { onLike() }
+                    RecBtn(Icons.Filled.Refresh, "刷新推荐", colors.textSecondary) { onRefresh() }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecBtn(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    desc: String,
+    tint: androidx.compose.ui.graphics.Color,
+    onClick: () -> Unit,
+) {
+    Box(
+        Modifier
+            .size(44.dp)
+            .shadePressable(cornerRadius = 14.dp, offset = 3.dp, blur = 5.dp, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = desc, tint = tint, modifier = Modifier.size(19.dp))
+    }
+}
+
+/**
+ * 关注的歌手卡（主页栏）：搜索页歌手卡同款设计、缩小一号（约主页栏目卡片的 1.5 倍宽）。
+ * 点击带出「飞位」转场进歌手页（与搜索页同款，坐标随卡片上报）。
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun SmallSingerCard(s: FollowSinger, onClick: (Rect) -> Unit) {
+    val colors = LocalShadeColors.current
+    var bounds by remember { mutableStateOf(Rect.Zero) }
+    Column(
+        Modifier
+            .width(156.dp)
+            .onGloballyPositioned { bounds = it.boundsInRoot() }
+            .cardTap { onClick(bounds) },
+    ) {
+        // 画框规格与歌手页头像完全一致（shade 20/6/12，图像内缩 10dp、圆角 14）
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .shadeSurface(cornerRadius = 20.dp, offset = 6.dp, blur = 12.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (s.pic.isEmpty()) {
+                CoverPlaceholder()
+            } else {
+                AsyncImage(
+                    model = s.pic,
+                    contentDescription = s.name,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(1f)
+                        .padding(10.dp)
+                        .clip(RoundedCornerShape(14.dp)),
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        // 名字过长自动换行（最多两行，不再截断）
+        Text(
+            s.name,
+            color = colors.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+            maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (s.desc.isNotEmpty()) {
+            Text(
+                s.desc,
+                color = colors.textTertiary, fontSize = 10.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
 

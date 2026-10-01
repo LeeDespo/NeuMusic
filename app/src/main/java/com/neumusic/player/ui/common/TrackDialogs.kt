@@ -7,8 +7,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
@@ -21,6 +24,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -66,6 +70,47 @@ fun ShadeDialog(
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
             )
             content()
+        }
+    }
+}
+
+/**
+ * 播放队列弹窗：当前播放队列，点选跳播。
+ * 播放详情页与播放栏共用（播放栏的第二行「播放列表」按钮也弹它）。
+ */
+@Composable
+fun QueueDialog(
+    tracks: List<Track>,
+    currentIndex: Int,
+    onDismiss: () -> Unit,
+    onPick: (Int) -> Unit,
+) {
+    val colors = LocalShadeColors.current
+    ShadeDialog(title = "播放队列（${tracks.size} 首）", onDismiss = onDismiss) {
+        androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxWidth().height(360.dp)) {
+            itemsIndexed(tracks) { i, t ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .flatPressable(cornerRadius = 0.dp) { onPick(i) }
+                        .padding(horizontal = 20.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "${i + 1}.",
+                        color = if (i == currentIndex) colors.accent else colors.textTertiary,
+                        fontSize = 12.sp, modifier = Modifier.width(34.dp),
+                    )
+                    Text(
+                        t.name,
+                        color = if (i == currentIndex) colors.accent else colors.textPrimary,
+                        fontSize = 14.sp,
+                        fontWeight = if (i == currentIndex) FontWeight.SemiBold else FontWeight.Normal,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
         }
     }
 }

@@ -80,6 +80,7 @@ object Prefs {
         downloadDirFlow.value = downloadDir
         downloadQualityFlow.value = downloadQuality
         barVizFlow.value = barViz
+        vinylModeFlow.value = vinylMode
     }
 
     val guid: String
@@ -253,6 +254,24 @@ object Prefs {
             barVizFlow.value = v
         }
 
+    /** 结构化诊断日志开关（默认开，关着时 AppLog 完全静默）。 */
+    var loggingEnabled: Boolean
+        get() = sp.getBoolean("loggingEnabled", true)
+        set(v) = sp.edit().putBoolean("loggingEnabled", v).apply()
+
+    /** 诊断日志存储上限（MB），超限自动裁掉前一半。 */
+    var logMaxMb: Int
+        get() = sp.getInt("logMaxMb", 2)
+        set(v) = sp.edit().putInt("logMaxMb", v.coerceIn(1, 64)).apply()
+
+    /** 黑胶唱片模式：播放页封面按唱片机样式呈现（宽画框 + 细纹路 + 播放时旋转）。 */
+    var vinylMode: Boolean
+        get() = sp.getBoolean("vinylMode", false)
+        set(v) {
+            sp.edit().putBoolean("vinylMode", v).apply()
+            vinylModeFlow.value = v
+        }
+
     /** ExoPlayer 的音频会话 id（PlayerHost 创建播放器后写入，供各音效挂载）。 */
     @Volatile
     var sessionIdForFx: Int = 0
@@ -269,6 +288,7 @@ object Prefs {
     val downloadDirFlow = MutableStateFlow(DownloadDir.MUSIC_NEUMUSIC)
     val downloadQualityFlow = MutableStateFlow(Quality.STANDARD)
     val barVizFlow = MutableStateFlow(false)
+    val vinylModeFlow = MutableStateFlow(false)
 
     val credential: CredentialInfo?
         get() {

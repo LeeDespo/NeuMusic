@@ -3,9 +3,12 @@ package com.neumusic.player.ui.common
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.Composable
@@ -65,6 +68,36 @@ fun BoxScope.HorizontalEdgeFades(
                 ),
         )
     }
+}
+
+/**
+ * 顶部渐隐（2026-09-30 规格）：**盖过系统状态栏**、范围更大（状态栏高度 + [extraHeight]）。
+ * 放在页面根 Box 里、statusBarsPadding 子树之外，列表内容从状态栏底下滚过时先溶进底色。
+ * 由调用方按 `canScrollBackward` 决定显隐（列表在顶部时不蒙灰）。
+ */
+@Composable
+fun BoxScope.TopEdgeFade(extraHeight: Dp = 48.dp, modifier: Modifier = Modifier) {
+    val colors = LocalShadeColors.current
+    val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val total = statusTop + extraHeight
+    // 「彻底消失线」在状态栏上缘：状态栏以上完全不透明（内容彻底消失），状态栏偏下还能
+    // 隐约看到渐隐中的内容，往下 48dp 内渐变到全透明（2026-09-30 用户规格）。
+    val solidAt = (statusTop / total).coerceIn(0.05f, 0.95f)
+    Box(
+        modifier
+            .align(Alignment.TopCenter)
+            .fillMaxWidth()
+            .height(total)
+            .background(
+                Brush.verticalGradient(
+                    colorStops = arrayOf(
+                        0f to colors.background,
+                        solidAt to colors.background,
+                        1f to colors.background.copy(alpha = 0f),
+                    )
+                )
+            ),
+    )
 }
 
 /** 垂直列表的上下渐隐。[top]/[bottom] 可单独关掉某一侧。 */

@@ -52,10 +52,12 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.neumusic.player.data.LikedStore
 import com.neumusic.player.data.Prefs
 import com.neumusic.player.data.Track
 import com.neumusic.player.data.api.SongApi
 import com.neumusic.player.player.PlayerHost
+import kotlinx.coroutines.launch
 import com.neumusic.player.shade.BlockSlice
 import com.neumusic.player.shade.LocalShadeColors
 import com.neumusic.player.shade.blockSlice
@@ -190,7 +192,8 @@ fun TrackRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            AlbumArt(track.coverUrl, 48.dp)
+            // 封面坐凸起画框（用户 2026-09-30 要求）：行内用小阴影，上下光影不越过行留白
+            AlbumArt(track.coverUrl, 50.dp, corner = 13.dp, plate = true, plateOffset = 3.dp, plateBlur = 5.dp)
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -267,7 +270,15 @@ fun TrackRow(
  * 只有直接坐在页面底色上时（播放页大封面）才传 `plate = true` 垫凸起底盘。
  */
 @Composable
-fun AlbumArt(url: String, size: Dp, corner: Dp = 14.dp, plate: Boolean = false) {
+fun AlbumArt(
+    url: String,
+    size: Dp,
+    corner: Dp = 14.dp,
+    plate: Boolean = false,
+    /** 画框阴影参数：列表行内的画框要用更小的阴影（offset+blur ≤ 行内留白），否则上下光影被相邻行截断。 */
+    plateOffset: Dp = 5.dp,
+    plateBlur: Dp = 8.dp,
+) {
     val colors = LocalShadeColors.current
     val inner = if (plate) size - 10.dp else size
     val innerCorner = if (plate) corner - 4.dp else corner
@@ -275,7 +286,7 @@ fun AlbumArt(url: String, size: Dp, corner: Dp = 14.dp, plate: Boolean = false) 
     Box(
         Modifier
             .size(size)
-            .then(if (plate) Modifier.shadeSurface(cornerRadius = corner, offset = 5.dp, blur = 8.dp) else Modifier),
+            .then(if (plate) Modifier.shadeSurface(cornerRadius = corner, offset = plateOffset, blur = plateBlur) else Modifier),
         contentAlignment = Alignment.Center,
     ) {
         if (url.isEmpty()) {
@@ -306,6 +317,39 @@ fun CoverPlaceholder(icon: ImageVector = Icons.Filled.MusicNote, text: String? =
     } else {
         Icon(icon, contentDescription = null, tint = colors.textTertiary, modifier = Modifier.size(22.dp))
     }
+}
+
+/**
+ * 红心点击的统一入口（曲目列表行 / 搜索结果 / 播放栏共用）：写服务端成功后更新本地集合。
+ */
+fun toggleLike(context: Context, track: Track, liked: Boolean) {
+    if (Prefs.credential == null) {
+        toastMain(context, "请先在设置里登录")
+        return
+    }
+    if (track.songId <= 0L) {
+        toastMain(context, "这首没有可用的歌曲 id，无法收藏")
+        return
+    }
+    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+        when (val r = runCatching { SongApi.setLiked(track, !liked) }
+            .getOrElse { com.neumusic.player.data.api.LikeResult.Rejected(-1) }) {
+            is com.neumusic.player.data.api.LikeResult.Success -> {
+                LikedStore.mark(track.songId, !liked)
+                toastMain(context, if (!liked) "已加入我喜欢" else "已取消喜欢")
+            }
+            is com.neumusic.player.data.api.LikeResult.Unavailable -> toastMain(context, r.reason)
+            is com.neumusic.player.data.api.LikeResult.Rejected -> toastMain(context, likeFailMessage(r.code))
+        }
+    }
+}
+
+/** 把写失败的业务码翻译成人话。1000 实测是短时风控限流（读接口同时正常）。 */
+private fun likeFailMessage(code: Int): String = when (code) {
+    1000 -> "操作太频繁，已被限流，请稍后再试"
+    80105 -> "该请求被服务端拒绝（网页 comm 常见），请稍后再试"
+    -1 -> "网络异常，请重试"
+    else -> "操作失败（错误码 $code）"
 }
 
 /**

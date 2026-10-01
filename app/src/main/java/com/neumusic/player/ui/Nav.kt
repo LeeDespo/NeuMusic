@@ -10,8 +10,8 @@ import androidx.compose.ui.geometry.Rect
  * （比如专辑详情）从主页卡片、歌单详情、搜索结果进来时，各自压在自己的来源之上，
  * 返回自然回到各自的来源，而不是一律回主页。
  *
- * [Player] 是特例：它是整块自下方上滑的全屏覆盖层，压在有内容的页面之上；
- * [Equalizer] 从播放页进入，于是栈是 `[…, Player, Equalizer]`，返回即回到播放页。
+ * [Player] 与 [Singer] 是特例：它们是整块自下方上滑的全屏覆盖层（播放栏同步上移「带出」），
+ * 压在有内容的页面之上；[Equalizer] 从播放页进入，于是栈是 `[…, Player, Equalizer]`，返回即回到播放页。
  */
 sealed interface Nav {
     data object Home : Nav
@@ -25,6 +25,14 @@ sealed interface Nav {
     data object Liked : Nav
     /** 播放页（全屏覆盖层）。 */
     data object Player : Nav
+    /** 歌手页（全屏覆盖层，升起动画与播放页同款）。歌数/专辑数来自搜索解析，供页首凹陷标签。 */
+    data class Singer(
+        val mid: String,
+        val name: String,
+        val pic: String,
+        val songNum: Int = 0,
+        val albumNum: Int = 0,
+    ) : Nav
     /** 均衡器 / 音效页。 */
     data object Equalizer : Nav
     data class PlaylistDetail(val tid: Long, val name: String, val songnum: Int? = null) : Nav

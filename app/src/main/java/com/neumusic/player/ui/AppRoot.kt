@@ -2,9 +2,7 @@ package com.neumusic.player.ui
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -13,30 +11,18 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import android.os.Build
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.ui.text.style.TextAlign
-import kotlin.math.roundToInt
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.foundation.layout.absoluteOffset
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.SkipNext
-import androidx.compose.material3.Icon
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -54,16 +40,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -74,17 +57,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
-import com.neumusic.player.data.Prefs
+import androidx.compose.animation.core.AnimationVector1D
+import com.neumusic.player.data.Track
 import com.neumusic.player.data.api.PlaylistApi
 import com.neumusic.player.data.api.RadioApi
 import com.neumusic.player.player.PlayerHost
-import com.neumusic.player.player.VizHost
 import com.neumusic.player.shade.LocalShadeColors
 import com.neumusic.player.shade.LocalShadeShadowAlpha
-import com.neumusic.player.shade.flatPressable
-import com.neumusic.player.shade.shadeInset
 import com.neumusic.player.shade.shadeSurface
-import com.neumusic.player.ui.common.AlbumArt
+import com.neumusic.player.ui.common.PlayerBar
+import com.neumusic.player.ui.common.SelectionBus
 import com.neumusic.player.ui.common.loadUrl
 import com.neumusic.player.ui.common.toastMain
 import com.neumusic.player.ui.home.AlbumsScreen
@@ -95,9 +77,7 @@ import com.neumusic.player.ui.player.EqualizerScreen
 import com.neumusic.player.ui.player.PlayerScreen
 import com.neumusic.player.ui.search.SearchScreen
 import com.neumusic.player.ui.settings.SettingsScreen
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.draw.clip
+import com.neumusic.player.ui.singer.SingerScreen
 import androidx.compose.ui.draw.drawBehind
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -109,10 +89,11 @@ import kotlinx.coroutines.launch
  * 对任何进入方式都成立（同一页面可能有多个来源）。栈底是主页，栈只剩主页时
  * 把返回交还系统（退出 App）。
  *
- * 播放页是全屏覆盖层而非普通页面（zIndex 高于一切页面内容），`translationY` 由是否
- * 处于栈顶驱动。均衡器压在播放页之上：**打开时播放页整体下滑露出音效页，返回时
- * 播放页重新从底部升起盖住音效页，动画结束后才把音效页真正弹出栈**（早前立即弹栈，
- * 底下的页面闪现一下再重放升起动画——实测踩过）。
+ * 播放页是全屏覆盖层而非普通页面（zIndex 高于一切页面内容）。**它的进出场和播放栏是
+ * 同一条时间轴**：打开时整条播放栏从原位一路升到屏幕顶外，「带出」挂在它下方的播放页
+ * （页面顶边始终贴着底栏底边，二者锁步上移）；返回精确倒放。均衡器压在播放页之上：
+ * **打开时播放页整体下滑露出音效页，返回时播放页重新从底部升起盖住音效页，动画结束后
+ * 才把音效页真正弹出栈**（早前立即弹栈，底下的页面闪现一下再重放升起动画——实测踩过）。
  *
  * 一二级页面切换是**整体场景缩放（摄像机推拉）**，操作对象是一级页面的根容器：
  * - 进入：**只有**一级场景的根容器做 scale + translation——uniform 缩放、相机中心
@@ -134,15 +115,22 @@ fun AppRoot() {
     var eqPopPending by remember { mutableStateOf(false) }
     var sceneSize by remember { mutableStateOf(IntSize.Zero) }
 
+    // ── 歌手页「飞位」转场（搜索页歌手卡 → 歌手页头像位）──
+    // 声明在 open/back 之前：back() 要置位/复位这些状态。
+    var singerBackPending by remember { mutableStateOf(false) }
+    var lastSingerEntry by remember { mutableStateOf<StackEntry?>(null) }
+
     fun open(req: NavRequest) {
-        if (morphBack || eqPopPending) return   // 转场进行中不接新入口（快速连点防护）
+        if (morphBack || eqPopPending || singerBackPending) return   // 转场进行中不接新入口（快速连点防护）
+        // 覆盖层防连点：播放页/歌手页已在栈顶时不重复压栈
+        if (stack.last().nav == req.nav && (req.nav == Nav.Player || req.nav is Nav.Singer)) return
         stack.add(StackEntry(req.nav, req.origin))
     }
 
 
     // 弹出栈顶。栈底（主页）不弹——交还系统处理（退出 App）。
     fun back() {
-        if (stack.size <= 1 || morphBack || eqPopPending) return
+        if (stack.size <= 1 || morphBack || eqPopPending || singerBackPending) return
         val top = stack.last()
         val below = stack.getOrNull(stack.lastIndex - 1)
         if (top.nav == Nav.Equalizer && below?.nav == Nav.Player) {
@@ -150,10 +138,23 @@ fun AppRoot() {
             eqPopPending = true
             playerRising = true
             scope.launch {
-                delay(360)   // ≈ slide 的 tween(320)
+                delay(440)   // ≈ slide 的 tween(400) + 余量：升起动画走完再弹栈
                 stack.removeAt(stack.lastIndex)
                 playerRising = false
                 eqPopPending = false
+            }
+            return
+        }
+        if (top.nav is Nav.Singer && top.origin != null) {
+            // 搜索页歌手卡「飞位」进入的歌手页：返回 = 页面先淡出、克隆卡飞回卡片原位，
+            // 动画走完才真正弹栈（与均衡器返回同款套路）。
+            if (!top.settled) return   // 前向飞行中不接受返回
+            singerBackPending = true
+            scope.launch {
+                delay(800)   // 页面淡出 140ms + 回飞 440ms + 余量
+                stack.removeAt(stack.lastIndex)
+                lastSingerEntry = null
+                singerBackPending = false
             }
             return
         }
@@ -211,14 +212,70 @@ fun AppRoot() {
 
     val top = stack.last()
     val playerOpen = top.nav == Nav.Player
-    // 0 = 播放页完全在屏幕下方（隐藏）；1 = 完全覆盖。
-    val slide by animateFloatAsState(if (playerOpen || playerRising) 1f else 0f, tween(320), label = "playerSlide")
-    val screenH = with(LocalDensity.current) { 900.dp.toPx() }
+    // 0 = 播放页完全在屏幕下方（隐藏）；1 = 完全覆盖。播放栏的上升与本进度锁步。
+    val slide by animateFloatAsState(
+        targetValue = if (playerOpen || playerRising) 1f else 0f,
+        animationSpec = tween(400, easing = FastOutSlowInEasing),
+        label = "playerSlide",
+    )
+    // 歌手页覆盖层：升起动画与播放页同款（整条底栏同步上移「带出」）。
+    val singerOpen = top.nav is Nav.Singer
+    val singerSlide by animateFloatAsState(
+        targetValue = if (singerOpen) 1f else 0f,
+        animationSpec = tween(400, easing = FastOutSlowInEasing),
+        label = "singerSlide",
+    )
 
-    // 摄像机推拉的宿主：最顶上那个带来源的页面（其上最多只有播放页覆盖层，
-    // 否则播放页盖在它上面时推拉层会跟着显示）。
-    val lastOriginIdx = stack.indexOfLast { it.origin != null && it.nav != Nav.Player }
-    val morphEntry = if (lastOriginIdx >= 0 && stack.drop(lastOriginIdx + 1).all { it.nav == Nav.Player }) {
+    // ── 歌手页「飞位」转场（搜索页歌手卡，用户 2026-09-30 规格）──
+    // 进入：页面其余元素随背景色遮罩淡出（前半程加浓）→ 克隆卡从卡片原位缓动飞到
+    // 歌手页头像落点（FastOutSlowIn 曲线，卡片文字飞行途中淡出）→ 就位后歌手页其余
+    // 元素淡入 + 上浮浮现（0.72→1 段，与落位轻微重叠）。返回精确倒放。
+    // 进度只在图层/绘制 lambda 里读；可见性用 derivedStateOf 门控重组。
+    val singerCardT = remember { Animatable(0f) }
+    var singerAvatarTarget by remember { mutableStateOf<Rect?>(null) }
+    if (top.nav is Nav.Singer) lastSingerEntry = stack.last()
+    val singerEntry = lastSingerEntry
+    // 两段式（用户 2026-09-30 规格）：克隆卡先飞完（440ms），**之后**歌手页才淡入（200ms）——
+    // 页面绝不在飞行途中提前出现。克隆卡陪到页面完全显形才隐去（同位同规格，无缝交接）。
+    val singerPageT = remember { Animatable(0f) }
+    LaunchedEffect(singerEntry?.nav, singerEntry?.settled == true, singerBackPending) {
+        val entry = singerEntry ?: return@LaunchedEffect
+        if (entry.origin == null) return@LaunchedEffect
+        when {
+            singerBackPending -> {
+                singerPageT.animateTo(0f, tween(140, easing = FastOutSlowInEasing))
+                singerCardT.animateTo(0f, tween(440, easing = FastOutSlowInEasing))
+            }
+            entry.settled -> { singerCardT.snapTo(1f); singerPageT.snapTo(1f) }
+            else -> {
+                singerCardT.snapTo(0f)
+                singerPageT.snapTo(0f)
+                singerCardT.animateTo(1f, tween(440, easing = FastOutSlowInEasing))
+                singerPageT.animateTo(1f, tween(200, easing = LinearOutSlowInEasing))
+                val i = stack.indexOf(entry)
+                if (i >= 0) stack[i] = entry.copy(settled = true)
+            }
+        }
+    }
+    val singerFlying by remember { derivedStateOf { singerCardT.value > 0.001f } }
+    // 整段序列（飞行+页面淡入）未完成：透明触摸拦截层只在这段时间存在。
+    // 早前用 singerFlying 判断——落位后它恒为 true，拦截层把全屏点击永远吃掉（"应用卡死"实测根因）。
+    val singerLanding by remember { derivedStateOf { singerCardT.value < 0.999f || singerPageT.value < 0.999f } }
+    // 从歌手页压入专辑详情时整层淡出（不回飞克隆卡）；返回时淡入复原
+    val singerOnTop = singerEntry != null && top.nav == singerEntry.nav
+    val singerCoverAlpha by animateFloatAsState(
+        targetValue = if (singerOnTop || !singerFlying) 1f else 0f,
+        animationSpec = tween(240, easing = FastOutSlowInEasing),
+        label = "singerCover",
+    )
+    val singerOverlayVisible by remember {
+        derivedStateOf { singerCardT.value > 0.001f || singerPageT.value > 0.001f || singerCoverAlpha > 0.001f }
+    }
+
+    // 摄像机推拉的宿主：最顶上那个带来源的页面（其上最多只有播放页/歌手页覆盖层，
+    // 否则覆盖层盖在它上面时推拉层会跟着显示）。
+    val lastOriginIdx = stack.indexOfLast { it.origin != null && it.nav != Nav.Player && it.nav !is Nav.Singer }
+    val morphEntry = if (lastOriginIdx >= 0 && stack.drop(lastOriginIdx + 1).all { it.nav == Nav.Player || it.nav is Nav.Singer }) {
         stack[lastOriginIdx]
     } else null
 
@@ -262,7 +319,7 @@ fun AppRoot() {
     val zoomSteady = morphEntry != null && morphEntry.settled && !morphBack
     val underNav = when {
         morphEntry != null -> stack.getOrNull(lastOriginIdx - 1)?.nav ?: Nav.Home
-        else -> (stack.lastOrNull { it.nav != Nav.Player } ?: stack.first()).nav
+        else -> (stack.lastOrNull { it.nav != Nav.Player && it.nav !is Nav.Singer } ?: stack.first()).nav
     }
 
     // 转场期间把场景阴影逐帧淡出（放大的高斯模糊逐帧重执行极其昂贵，实测帧 150ms+）；
@@ -329,22 +386,48 @@ fun AppRoot() {
         }
         }
 
-        // ── 底部播放栏：随播放页展开而上移淡出，制造「被带出去」的连续感 ──
+        // ── 底部播放栏（用户 2026-09-29 规格）：覆盖底部的底栏；无音乐时下沉消失、
+        // 有音乐时上升出现；选择模式时沉降给选择底栏让位；点击打开播放页时整条一路
+        // 升到屏幕顶外，「带出」挂在它下方的播放页（与 slide 同一条时间轴、锁步）──
         val current by PlayerHost.current.collectAsState()
-        if (current != null) {
-            MiniPlayerBar(
+        val selectionActive by SelectionBus.active.collectAsState()
+        // 消失要「沉下去」而不是瞬间移除：记住最后一条曲目，沉底后仍在组合但不可见
+        var lastTrack by remember { mutableStateOf<Track?>(null) }
+        if (current != null) lastTrack = current
+        var barHeightPx by remember { mutableFloatStateOf(0f) }
+        val density = LocalDensity.current
+        val barVisible = current != null && !selectionActive
+        val barDrop by animateFloatAsState(
+            targetValue = if (barVisible) 0f else barHeightPx + with(density) { 30.dp.toPx() },
+            animationSpec = tween(340, easing = FastOutSlowInEasing),
+            label = "barDrop",
+        )
+        val barTrack = lastTrack
+        if (barTrack != null) {
+            PlayerBar(
+                track = barTrack,
                 onOpen = { if (stack.last().nav != Nav.Player) open(NavRequest(Nav.Player)) },
+                onOpenSinger = { s ->
+                    if (stack.last().nav !is Nav.Singer) {
+                        open(NavRequest(Nav.Singer(s.mid, s.name, s.pic, s.songNum, s.albumNum)))
+                    }
+                },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     // 必须浮在推拉层(zIndex 3)之上——否则二级页面盖住播放栏（实测踩过）；
                     // 仍低于播放页覆盖层(4)
                     .zIndex(3.5f)
+                    .onSizeChanged { barHeightPx = it.height.toFloat() }
                     .graphicsLayer {
-                        translationY = -screenH * 0.42f * slide
-                        alpha = 1f - slide
-                    }
-                    .navigationBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                        // 只在图层 lambda 里读进度：逐帧平移，零重组。
+                        // 播放页/普通歌手页由底栏带出（锁步上升）；搜索卡「飞位」进入的
+                        // 歌手页则不做底栏上升，底栏随转场进度淡出（被浮现的页面盖住）。
+                        val sh = sceneSize.height.toFloat()
+                        val cardFlight = singerEntry?.origin != null && top.nav is Nav.Singer
+                        val ride = if (cardFlight) 0f else singerSlide
+                        alpha = if (cardFlight) (1f - singerCardT.value).coerceIn(0f, 1f) else 1f
+                        translationY = if (sh > 0f) -maxOf(slide, ride) * sh + barDrop else barDrop
+                    },
             )
         }
 
@@ -375,21 +458,123 @@ fun AppRoot() {
             )
         }
 
-        // ── 播放页覆盖层：整块从下方上移（zIndex 高于推拉层）──
+        // ── 播放页覆盖层：顶边始终贴着播放栏的底边，与底栏锁步上升（zIndex 高于推拉层）；
+        // 整块是实心页面，飞行中不做透明度渐变（它本来就被底栏从屏幕外拖上来）──
         if (slide > 0.001f) {
             Box(
                 Modifier
                     .fillMaxSize()
                     .zIndex(4f)
                     .graphicsLayer {
-                        translationY = (1f - slide) * screenH
-                        alpha = (slide * 1.6f).coerceAtMost(1f)
+                        val sh = sceneSize.height.toFloat()
+                        if (sh > 0f) translationY = (1f - slide) * sh
                     },
             ) {
                 PlayerScreen(
                     onBack = { back() },
                     onOpenEqualizer = { open(NavRequest(Nav.Equalizer)) },
                 )
+            }
+        }
+
+        // ── 歌手页「飞位」转场的背景色遮罩：页面其余元素在前半程淡出（被点击的卡片
+        // 由克隆卡原样盖住，视觉上保持不动）──
+        if (singerFlying && singerEntry?.origin != null) {
+            val tState = singerCardT
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .zIndex(2.6f)
+                    .drawBehind {
+                        val a = (tState.value * 2f).coerceIn(0f, 1f)
+                        if (a > 0.001f) drawRect(colors.background, alpha = a)
+                    },
+            )
+        }
+
+        // ── 飞行的克隆卡：从歌手卡原位飞向歌手页头像落点（缓动曲线，非匀速）。
+        // 按卡片原尺寸布局、逐帧缩放平移到目标，落位瞬间与页面头像无缝交接。──
+        if (singerFlying && singerEntry?.origin != null) {
+            val entry = singerEntry
+            val s = entry.nav as Nav.Singer
+            val tState = singerCardT
+            val target = singerAvatarTarget
+            val cardW = with(LocalDensity.current) { (entry.origin?.width ?: 1f).toDp() }
+            Box(
+                Modifier
+                    .zIndex(3.7f)
+                    .width(cardW)
+                    .graphicsLayer {
+                        val t = tState.value
+                        val o = entry.origin ?: return@graphicsLayer
+                        // 落点 = 歌手页头像画框（布局完成后上报）；未量出前用估算兜底
+                        val tw = target?.width ?: (sceneSize.width * 0.55f)
+                        val tl = target?.left ?: (sceneSize.width - tw) / 2f
+                        val tt = target?.top ?: (sceneSize.height * 0.1f)
+                        translationX = lerp(o.left, tl, t)
+                        translationY = lerp(o.top, tt, t)
+                        val sc = lerp(1f, tw / o.width.coerceAtLeast(1f), t)
+                        scaleX = sc
+                        scaleY = sc
+                        transformOrigin = TransformOrigin(0f, 0f)
+                        // 飞行+页面淡入全部完成后才隐去（页面头像同规格，交接无跳变）
+                        if (t >= 0.999f && singerPageT.value >= 0.999f) alpha = 0f
+                    },
+            ) {
+                SingerFlightCard(s = s, t = tState)
+            }
+        }
+
+        // ── 歌手页覆盖层（zIndex 4）：两条路径。
+        // 播放栏进入（无 origin）= 整块自下方升起，底栏同步上移带出；
+        // 搜索卡进入（有 origin）= 原地淡入 + 上浮浮现（飞位转场的最后一站），
+        // 飞行中拦截触摸；被专辑详情压住时整层淡出而非回飞。──
+        if (singerEntry != null && singerOverlayVisible) {
+            val hasOrigin = singerEntry.origin != null
+            val showRise = !hasOrigin && singerSlide > 0.001f
+            if (showRise || (hasOrigin && singerOverlayVisible)) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .zIndex(4f)
+                        .graphicsLayer {
+                            val sh = sceneSize.height.toFloat()
+                            if (!hasOrigin && sh > 0f) translationY = (1f - singerSlide) * sh
+                        },
+                ) {
+                    if (hasOrigin) {
+                        // 纯淡入、**不做上浮**：上浮会让头像在「落点测量期」处于瞬态偏移位置，
+                        // 克隆卡落位后页面归位出现错位（用户实测"最后一段不能完全重合"）。
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    alpha = singerPageT.value * singerCoverAlpha
+                                },
+                        ) {
+                            SingerScreen(
+                                singer = singerEntry.nav as Nav.Singer,
+                                onBack = { back() },
+                                onOpenAlbum = { mid, name -> open(NavRequest(Nav.AlbumDetail(mid, name))) },
+                                onAvatarBounds = { singerAvatarTarget = it },
+                            )
+                        }
+                        // 飞行中页面尚透明，但会吃触摸——落位前放一块透明拦截层
+                        if (singerLanding) {
+                            Box(
+                                Modifier
+                                    .fillMaxSize()
+                                    .pointerInput(Unit) { detectTapGestures { } },
+                            )
+                        }
+                    } else {
+                        SingerScreen(
+                            singer = singerEntry.nav as Nav.Singer,
+                            onBack = { back() },
+                            onOpenAlbum = { mid, name -> open(NavRequest(Nav.AlbumDetail(mid, name))) },
+                        )
+                    }
+                }
             }
         }
     }
@@ -411,6 +596,7 @@ private fun PageContent(
         Nav.Search -> SearchScreen(
             onBack = onBack,
             onOpenAlbum = { onOpen(NavRequest(Nav.AlbumDetail(it.mid, it.name, it.songnum))) },
+            onOpenSinger = { s, origin -> onOpen(NavRequest(Nav.Singer(s.mid, s.name, s.pic, s.songNum, s.albumNum), origin)) },
         )
         Nav.Settings -> SettingsScreen(onBack = onBack)
         Nav.Playlists -> PlaylistsScreen(
@@ -464,12 +650,66 @@ private fun PageContent(
                 onOpenAlbum = { t -> onOpen(NavRequest(Nav.AlbumDetail(t.albumMid, t.albumName))) },
             )
         }
-        // 播放页只作为覆盖层出现，正常情况下不会走到这里；兜底不渲染。
+        // 播放页与歌手页只作为覆盖层出现，正常情况下不会走到这里；兜底不渲染。
         Nav.Player -> Unit
+        is Nav.Singer -> Unit
     }
 }
 
 private fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t
+
+/**
+ * 「飞位」转场的克隆卡：外观与搜索结果里的 [com.neumusic.player.ui.common.SingerCard]
+ * 完全一致（同字体/间距/画框规格），仅文字部分随飞行进度淡出——卡就位后只剩头像，
+ * 与歌手页头像（同规格：内缩 10dp、圆角 14）无缝交接。进度只在图层 lambda 里读。
+ */
+@Composable
+private fun SingerFlightCard(s: Nav.Singer, t: Animatable<Float, AnimationVector1D>) {
+    val colors = LocalShadeColors.current
+    Column {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .shadeSurface(cornerRadius = 20.dp, offset = 6.dp, blur = 12.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (s.pic.isEmpty()) {
+                Box(
+                    Modifier.fillMaxWidth().aspectRatio(1f).padding(10.dp)
+                        .clip(RoundedCornerShape(14.dp)).background(colors.background),
+                    contentAlignment = Alignment.Center,
+                ) { com.neumusic.player.ui.common.CoverPlaceholder() }
+            } else {
+                AsyncImage(
+                    model = s.pic,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxWidth().aspectRatio(1f).padding(10.dp)
+                        .clip(RoundedCornerShape(14.dp)).background(colors.background),
+                )
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(
+            s.name,
+            modifier = Modifier
+                .fillMaxWidth()
+                .graphicsLayer { alpha = (1f - t.value * 2.4f).coerceIn(0f, 1f) },
+            color = colors.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+            maxLines = 2, overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.height(2.dp))
+        Text(
+            "歌曲 ${s.songNum} · 专辑 ${s.albumNum}",
+            modifier = Modifier
+                .fillMaxWidth()
+                .graphicsLayer { alpha = (1f - t.value * 2.4f).coerceIn(0f, 1f) },
+            color = colors.textTertiary, fontSize = 11.sp,
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
 
 /**
  * 推拉的二级页面端：推拉（含完全模糊）完成后 80ms，整屏淡入 + 上浮 12dp
@@ -504,83 +744,4 @@ private fun SecondPageOverlay(
     }
 }
 
-/** 底部播放栏：点封面/信息带出播放页。开启可视化时显示实时电平胶囊。 */
-@Composable
-private fun MiniPlayerBar(onOpen: () -> Unit, modifier: Modifier = Modifier) {
-    val colors = LocalShadeColors.current
-    val track by PlayerHost.current.collectAsState()
-    val playing by PlayerHost.isPlaying.collectAsState()
-    val vizOn by Prefs.barVizFlow.collectAsState()
-    // FFT（Visualizer）优先；模拟器等不支持时回退到 PCM 分段电平
-    val usingFft by VizHost.usingFft.collectAsState()
-    val fftLevels by VizHost.levels.collectAsState()
-    val pcmLevels by PlayerHost.vizProcessor.levels.collectAsState()
-    val levels = if (usingFft) fftLevels else pcmLevels
-    val t = track ?: return
-    Row(
-        modifier
-            .fillMaxWidth()
-            .shadeSurface(cornerRadius = 26.dp, offset = 6.dp, blur = 10.dp)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        // 整条播放栏本身是凸起面，内部一律「平」按压 —— 不在凸起上再做凸起。
-        Box(Modifier.flatPressable(cornerRadius = 20.dp, onClick = onOpen)) {
-            AlbumArt(t.coverUrl, 44.dp, corner = 12.dp)
-        }
-        Column(
-            Modifier.weight(1f)
-                .flatPressable(cornerRadius = 14.dp, onClick = onOpen)
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-        ) {
-            Text(
-                t.name, fontSize = 14.sp, color = colors.textPrimary,
-                fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            )
-            Text(t.singer, fontSize = 11.sp, color = colors.textSecondary, maxLines = 1)
-        }
-        // 音频可视化：小凹陷"电平屏"（设置里开关；暂停/关闭时不显示）
-        if (vizOn) {
-            Box(
-                Modifier
-                    .size(width = 56.dp, height = 30.dp)
-                    .shadeInset(cornerRadius = 8.dp, offset = 2.dp, blur = 3.dp)
-                    .padding(horizontal = 5.dp, vertical = 4.dp),
-            ) {
-                Canvas(Modifier.fillMaxSize()) {
-                    val n = 5
-                    val gap = 3.dp.toPx()
-                    val barW = (size.width - gap * (n - 1)) / n
-                    for (i in 0 until n) {
-                        val level = levels.getOrElse(i * VizHost.BARS / n) { 0f }
-                        val shown = if (playing) level else level * 0.12f
-                        val h = (size.height * (0.12f + 0.88f * shown)).coerceAtLeast(2.dp.toPx())
-                        drawRoundRect(
-                            color = colors.accent,
-                            topLeft = Offset(i * (barW + gap), size.height - h),
-                            size = Size(barW, h),
-                            cornerRadius = CornerRadius(barW / 3f),
-                        )
-                    }
-                }
-            }
-        }
-        Box(
-            Modifier.size(40.dp).flatPressable(cornerRadius = 20.dp) { PlayerHost.toggle() },
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                contentDescription = if (playing) "暂停" else "播放",
-                tint = colors.accent, modifier = Modifier.size(20.dp),
-            )
-        }
-        Box(
-            Modifier.size(40.dp).flatPressable(cornerRadius = 20.dp) { PlayerHost.next() },
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(Icons.Filled.SkipNext, "下一首", tint = colors.textSecondary, modifier = Modifier.size(18.dp))
-        }
-    }
-}
+/** 底部播放栏已移到 [com.neumusic.player.ui.common.PlayerBar]（底栏式，见该文件注释）。 */

@@ -43,10 +43,8 @@ import com.neumusic.player.data.LikedStore
 import com.neumusic.player.data.PlaylistItem
 import com.neumusic.player.data.Prefs
 import com.neumusic.player.data.Track
-import com.neumusic.player.data.api.LikeResult
 import com.neumusic.player.data.api.PlaylistApi
 import com.neumusic.player.data.api.RadioApi
-import com.neumusic.player.data.api.SongApi
 import com.neumusic.player.shade.LocalShadeColors
 import com.neumusic.player.shade.flatPressable
 import com.neumusic.player.shade.shadePressable
@@ -60,10 +58,12 @@ import com.neumusic.player.ui.common.TrackRow
 import com.neumusic.player.ui.common.playQueue
 import com.neumusic.player.ui.common.doubleTapToTop
 import com.neumusic.player.ui.common.toastMain
+import com.neumusic.player.ui.common.toggleLike
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.runtime.mutableStateListOf
 import com.neumusic.player.data.DownloadStore
@@ -72,8 +72,16 @@ import com.neumusic.player.ui.common.SelectionBar
 import com.neumusic.player.ui.common.TrackFormatsDialog
 import com.neumusic.player.ui.common.TrackInfoDialog
 import com.neumusic.player.ui.common.TrackMoreDialog
-import com.neumusic.player.ui.common.downloadIconRotation
+import com.neumusic.player.ui.common.rememberSelectionBusSync
 import com.neumusic.player.shade.shadeSurface
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 
 /** 二级页通用顶栏：凸起返回按钮 + 标题。不随滚动隐藏（详情页短，无必要）。 */
 @Composable
@@ -152,10 +160,11 @@ fun TrackListScreen(
     val likedIds by LikedStore.liked.collectAsState()
     val downloadedMap by DownloadStore.records.collectAsState()
 
-    // 选择模式（顶栏下载按钮触发）
+    // 选择模式（顶栏下载按钮触发）：激活时通知 AppRoot 把播放栏沉下去，给选择底栏让位
     var selecting by remember { mutableStateOf(false) }
     val selectedMids = remember { mutableStateListOf<String>() }
     var downloadProgress by remember { mutableStateOf<String?>(null) }
+    rememberSelectionBusSync(selecting)
 
     // 「更多」弹窗
     var moreTrack by remember { mutableStateOf<Track?>(null) }
@@ -292,7 +301,6 @@ fun TrackListScreen(
 
     Box(Modifier.fillMaxSize().background(colors.background)) {
         val list = tracks
-        val downloadRot = downloadIconRotation(selecting)
         // LazyColumn 恒渲染：顶栏（返回键）属于页面本身，空列表/加载中也不能消失
         LazyColumn(
             state = listState,
@@ -301,25 +309,32 @@ fun TrackListScreen(
                 start = 16.dp, end = 16.dp,
                 top = 8.dp,
                 // 底部留白：让最后一行能滚到播放栏之上，而不是被压住。
-                bottom = 132.dp,
+                bottom = 150.dp,
             ),
         ) {
             // 顶栏和主页一样是页面的一部分：往上滑就跟着滚走，不再悬浮折叠
             item(key = "topbar") {
                 ListTopBarRow(title, onBack) {
+                    // 下载钮：普通态是下载图标，选择模式中变为 ✕（退出选择）
                     Box(
                         Modifier.size(42.dp)
-                            .graphicsLayer { rotationZ = downloadRot }
                             .shadePressable(cornerRadius = 21.dp, offset = 4.dp, blur = 6.dp) {
-                                selecting = !selecting
-                                if (!selecting) selectedMids.clear()
+                                if (selecting) {
+                                    selecting = false
+                                    selectedMids.clear()
+                                } else {
+                                    selecting = true
+                                }
                             },
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(
-                            Icons.Filled.Download, "选择下载",
-                            tint = colors.accent, modifier = Modifier.size(20.dp),
-                        )
+                        Crossfade(selecting, animationSpec = tween(160), label = "dlIcon") { sel ->
+                            Icon(
+                                if (sel) Icons.Filled.Close else Icons.Filled.Download,
+                                if (sel) "退出选择" else "选择下载",
+                                tint = colors.accent, modifier = Modifier.size(20.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -391,10 +406,15 @@ fun TrackListScreen(
         // 列表上下边缘的渐隐（与主页一致）
         VerticalEdgeFades(state = listState, height = 30.dp)
 
-        // 选择模式：固定覆盖条（全选/反选/取消/下载所选）；普通态无覆盖顶栏
-        if (selecting) {
+        // 选择模式：底部工具栏上升出现（全选/反选/下载三图标钮）；退出时下滑消失。
+        // 播放栏由 AppRoot 监听 SelectionBus 同步沉降让位。
+        AnimatedVisibility(
+            visible = selecting,
+            enter = slideInVertically(tween(300, easing = FastOutSlowInEasing)) { it } + fadeIn(tween(180)),
+            exit = slideOutVertically(tween(240)) { it } + fadeOut(tween(150)),
+            modifier = Modifier.align(Alignment.BottomCenter).zIndex(2f),
+        ) {
             SelectionBar(
-                selecting = selecting,
                 selectedCount = selectedMids.size,
                 downloading = downloadProgress,
                 onSelectAll = {
@@ -408,7 +428,6 @@ fun TrackListScreen(
                     selectedMids.clear()
                     invert.forEach { (mid, sel) -> if (sel) selectedMids.add(mid) }
                 },
-                onCancel = { selecting = false; selectedMids.clear() },
                 onDownload = {
                     scope.launch {
                         val picks = list.filter { it.mid in selectedMids }
@@ -421,7 +440,6 @@ fun TrackListScreen(
                         selecting = false
                     }
                 },
-                modifier = Modifier.align(Alignment.TopCenter).zIndex(2f),
             )
         }
     }
@@ -530,36 +548,7 @@ private fun ListFooter(
     }
 }
 
-/** 批量列表里的红心点击：写服务端成功后更新本地集合。 */
-fun toggleLike(context: android.content.Context, track: Track, liked: Boolean) {
-    if (Prefs.credential == null) {
-        toastMain(context, "请先在设置里登录")
-        return
-    }
-    if (track.songId <= 0L) {
-        toastMain(context, "这首没有可用的歌曲 id，无法收藏")
-        return
-    }
-    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
-        when (val r = runCatching { SongApi.setLiked(track, !liked) }
-            .getOrElse { LikeResult.Rejected(-1) }) {
-            is LikeResult.Success -> {
-                LikedStore.mark(track.songId, !liked)
-                toastMain(context, if (!liked) "已加入我喜欢" else "已取消喜欢")
-            }
-            is LikeResult.Unavailable -> toastMain(context, r.reason)
-            is LikeResult.Rejected -> toastMain(context, likeFailMessage(r.code))
-        }
-    }
-}
-
-/** 把写失败的业务码翻译成人话。1000 实测是短时风控限流（读接口同时正常）。 */
-private fun likeFailMessage(code: Int): String = when (code) {
-    1000 -> "操作太频繁，已被限流，请稍后再试"
-    80105 -> "该请求被服务端拒绝（网页 comm 常见），请稍后再试"
-    -1 -> "网络异常，请重试"
-    else -> "操作失败（错误码 $code）"
-}
+/** 批量列表里的红心点击走 common 的 [com.neumusic.player.ui.common.toggleLike]。 */
 
 
 /** 列表页的顶栏行：放在列表第一项里，随内容一起滚走（与主页一致，不再悬浮折叠）。 */
@@ -603,7 +592,7 @@ fun PlaylistsScreen(onBack: () -> Unit, onOpen: (PlaylistItem) -> Unit) {
         Box(Modifier.fillMaxSize()) {
             LazyColumn(
                 state = playlistsState,
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 132.dp),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 150.dp),
             ) {
                 item(key = "topbar") { ListTopBarRow("收藏的歌单", onBack) }
                 item {
@@ -638,7 +627,7 @@ fun AlbumsScreen(onBack: () -> Unit, onOpen: (AlbumItem) -> Unit) {
         Box(Modifier.fillMaxSize()) {
             LazyColumn(
                 state = albumsState,
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 132.dp),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 150.dp),
             ) {
                 item(key = "topbar") { ListTopBarRow("收藏的专辑", onBack) }
                 item {

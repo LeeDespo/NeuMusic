@@ -250,6 +250,43 @@ fun Modifier.shadeInset(cornerRadius: Dp = 16.dp, offset: Dp = 4.dp, blur: Dp = 
     }
 }
 
+/**
+ * 底部停靠的凸起面板（播放栏、选择模式底栏）：阴影四周都画（底边在屏幕外，画了也看不见），
+ * 表面填充**只有顶角是圆的**——底边贴着屏幕下缘，不能出现圆角缝隙。
+ */
+@Composable
+fun Modifier.shadeSurfaceTop(cornerRadius: Dp = 22.dp, offset: Dp = 6.dp, blur: Dp = 10.dp): Modifier {
+    val colors = LocalShadeColors.current
+    val relief = LocalReliefScale.current
+    val shadowAlpha = LocalShadeShadowAlpha.current
+    return this.drawBehind {
+        val off = offset.toPx() * relief
+        val blurPx = blur.toPx() * relief
+        val a = shadowAlpha.floatValue.coerceIn(0f, 1f)
+        if (a > 0.01f) {
+            val shadow = roundedPath(cornerRadius.toPx())
+            drawIntoCanvas { canvas ->
+                drawOffsetPath(canvas, shadow, -off, -off, nativePaint(colors.shadowLight, a, blurPx))
+                drawOffsetPath(canvas, shadow, off, off, nativePaint(colors.shadowDark, a, blurPx))
+            }
+        }
+        val r = CornerRadius(cornerRadius.toPx(), cornerRadius.toPx())
+        val z = CornerRadius.Zero
+        val fill = Path().apply {
+            addRoundRect(
+                RoundRect(
+                    0f, 0f, size.width, size.height,
+                    topLeftCornerRadius = r, topRightCornerRadius = r,
+                    bottomRightCornerRadius = z, bottomLeftCornerRadius = z,
+                )
+            )
+        }
+        drawIntoCanvas { canvas ->
+            canvas.nativeCanvas.drawPath(fill.asAndroidPath(), nativePaint(colors.background, 1f, 0f))
+        }
+    }
+}
+
 /** 「整块凸面」切片的行位：决定圆角与投影出现在哪一端。 */
 enum class BlockSlice { Head, Middle, Tail, Single }
 

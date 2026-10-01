@@ -4,6 +4,8 @@ import android.os.Build
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.LocalOverscrollConfiguration
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Arrangement
@@ -22,6 +24,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -33,10 +36,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -74,6 +81,7 @@ private const val RETURN_DELAY_MS = 3000L
  * - **音译**（`roman`）：主行下方的罗马音行；
  * - **翻译**（`translation`）：主行下方的译文行。
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun LyricsView(
     lyrics: Lyrics?,
@@ -88,6 +96,12 @@ fun LyricsView(
     onToggleTranslation: () -> Unit,
     onToggleRoman: () -> Unit,
     onToggleKana: () -> Unit,
+    /** false = 禁用用户滚动（播放页"封面+歌词"模式的三行迷你歌词，拖动要让给模式切换）。 */
+    userScrollEnabled: Boolean = true,
+    /** 非 null 时：列表已在顶部仍向下拉超过阈值 → 触发收起（纯歌词→封面+歌词）。 */
+    onPullDownCollapse: (() -> Unit)? = null,
+    /** 迷你歌词里不放右上角三开关（放不下）。 */
+    showToggles: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalShadeColors.current
@@ -169,8 +183,32 @@ fun LyricsView(
 
         val density = LocalDensity.current
         val topPad = with(density) { (maxHeight * ANCHOR_FRACTION).toPx().toInt().coerceAtLeast(0) }
+
+        // ── 收歌手势（纯歌词模式专用）：列表到顶后继续下拉的「剩余量」走 onPostScroll。
+        // 必须禁掉 overscroll（stretch 会把到顶的下拉吃掉），剩余量才能流进连接。──
+        val pullLeft = remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+        val collapseCb = onPullDownCollapse
+        val collapseConn = remember(collapseCb) {
+            object : NestedScrollConnection {
+                override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                    if (collapseCb == null || source != NestedScrollSource.UserInput) return Offset.Zero
+                    if (available.y > 0f) {
+                        pullLeft.floatValue += available.y
+                        if (pullLeft.floatValue > with(density) { 90.dp.toPx() }) {
+                            pullLeft.floatValue = 0f
+                            collapseCb()
+                        }
+                        return available
+                    }
+                    return Offset.Zero
+                }
+            }
+        }
+
+        val lyricList: @Composable () -> Unit = {
         LazyColumn(
             state = listState,
+            userScrollEnabled = userScrollEnabled,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(
                 start = 28.dp, end = 28.dp,
@@ -276,25 +314,36 @@ fun LyricsView(
                 }
             }
         }
+        }
+
+        if (collapseCb != null) {
+            CompositionLocalProvider(LocalOverscrollConfiguration provides null) {
+                Box(Modifier.nestedScroll(collapseConn)) { lyricList() }
+            }
+        } else {
+            lyricList()
+        }
 
         // 边缘渐隐（与主页同一处理）
         VerticalEdgeFades(state = listState, height = 30.dp)
 
-        // ── 译 / 音 / 注 三个开关：同一行，右上角 ──
-        AnnotationToggles(
-            showTranslation = showTranslation,
-            showRoman = showRoman,
-            showKana = showKana,
-            canToggleTranslation = canToggleTranslation,
-            canToggleRoman = canToggleRoman,
-            canToggleKana = canToggleKana,
-            onToggleTranslation = onToggleTranslation,
-            onToggleRoman = onToggleRoman,
-            onToggleKana = onToggleKana,
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(end = 24.dp, top = 6.dp),
-        )
+        // ── 译 / 音 / 注 三个开关：同一行，右上角（迷你歌词里不放）──
+        if (showToggles) {
+            AnnotationToggles(
+                showTranslation = showTranslation,
+                showRoman = showRoman,
+                showKana = showKana,
+                canToggleTranslation = canToggleTranslation,
+                canToggleRoman = canToggleRoman,
+                canToggleKana = canToggleKana,
+                onToggleTranslation = onToggleTranslation,
+                onToggleRoman = onToggleRoman,
+                onToggleKana = onToggleKana,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(end = 24.dp, top = 6.dp),
+            )
+        }
     }
 }
 

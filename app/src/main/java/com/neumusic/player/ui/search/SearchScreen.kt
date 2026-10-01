@@ -1,12 +1,23 @@
 package com.neumusic.player.ui.search
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
@@ -16,9 +27,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -34,7 +47,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -54,8 +69,12 @@ import com.neumusic.player.shade.LocalShadeColors
 import com.neumusic.player.shade.flatPressable
 import com.neumusic.player.shade.shadeInset
 import com.neumusic.player.shade.shadePressable
-import com.neumusic.player.ui.common.AlbumArt
 import com.neumusic.player.ui.common.CollapsingTopBar
+import com.neumusic.player.ui.common.TopEdgeFade
+import com.neumusic.player.ui.common.cardGridItems
+import com.neumusic.player.ui.common.gridColumns
+import com.neumusic.player.ui.common.MediaCard
+import com.neumusic.player.ui.common.SingerCard
 import com.neumusic.player.ui.common.RowDivider
 import com.neumusic.player.ui.common.SelectionBar
 import com.neumusic.player.ui.common.TrackFormatsDialog
@@ -64,15 +83,11 @@ import com.neumusic.player.ui.common.TrackListBlock
 import com.neumusic.player.ui.common.TrackRow
 import com.neumusic.player.ui.common.VerticalEdgeFades
 import com.neumusic.player.ui.common.TrackMoreDialog
-import com.neumusic.player.ui.common.TopBarContentSwitch
 import com.neumusic.player.ui.common.doubleTapToTop
-import com.neumusic.player.ui.common.downloadIconRotation
 import com.neumusic.player.ui.common.playQueue
+import com.neumusic.player.ui.common.rememberSelectionBusSync
 import com.neumusic.player.ui.common.rememberTopBarVisible
-import com.neumusic.player.ui.home.DetailTopBar
-import com.neumusic.player.ui.home.toggleLike
-import com.neumusic.player.shade.ShadeFusedTab
-import com.neumusic.player.shade.ShadeFusedTabs
+import com.neumusic.player.ui.common.toggleLike
 import kotlinx.coroutines.launch
 import com.neumusic.player.data.SearchHistoryStore
 
@@ -85,6 +100,7 @@ private enum class SearchTab(val label: String, val api: Int) {
 fun SearchScreen(
     onBack: () -> Unit,
     onOpenAlbum: (AlbumItem) -> Unit = {},
+    onOpenSinger: (SearchSinger, androidx.compose.ui.geometry.Rect) -> Unit = { _, _ -> },
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -93,6 +109,7 @@ fun SearchScreen(
     val barVisible = rememberTopBarVisible(listState)
     val likedIds by LikedStore.liked.collectAsState()
     val downloadedMap by DownloadStore.records.collectAsState()
+    val screenWidth = LocalConfiguration.current.screenWidthDp.dp
 
     var query by rememberSaveable { mutableStateOf("") }
     val history by SearchHistoryStore.items.collectAsState()
@@ -107,10 +124,11 @@ fun SearchScreen(
     var albumResults by remember { mutableStateOf<List<AlbumItem>?>(null) }
     var playlistResults by remember { mutableStateOf<List<PlaylistItem>?>(null) }
 
-    // 选择模式（仅歌曲标签下可用）
+    // 选择模式（仅歌曲标签下可进入；激活时通知 AppRoot 沉下播放栏给选择底栏让位）
     var selecting by remember { mutableStateOf(false) }
     val selectedMids = remember { mutableStateListOf<String>() }
     var downloadProgress by remember { mutableStateOf<String?>(null) }
+    rememberSelectionBusSync(selecting)
     var moreTrack by remember { mutableStateOf<Track?>(null) }
     var infoTrack by remember { mutableStateOf<Track?>(null) }
     var formatTrack by remember { mutableStateOf<Track?>(null) }
@@ -160,141 +178,185 @@ fun SearchScreen(
     }
 
     Box(Modifier.fillMaxSize().imePadding()) {
-        Column(
-            Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                // 顶栏悬浮在上面（66dp），内容从它下方开始，避免重叠
-                .padding(top = 74.dp)
-                .padding(horizontal = 16.dp),
+        // 2026-09-30 改版：**所有元素都随内容一起上滑**（返回/标题/下载钮、搜索框、标签栏
+        // 全部是列表的表头 item，不再悬浮折叠），与主页/列表页一致；内容从状态栏底下滚过。
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize().background(colors.background).doubleTapToTop(listState),
+            contentPadding = PaddingValues(bottom = 150.dp),
         ) {
-            // 搜索框（凹陷轨道；内部按钮只能「平」）
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier
-                        .weight(1f)
-                        .height(50.dp)
-                        .shadeInset(cornerRadius = 18.dp, offset = 3.dp, blur = 5.dp)
-                        .padding(horizontal = 14.dp),
-                    contentAlignment = Alignment.CenterStart,
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.Search, null, tint = colors.textTertiary, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.size(8.dp))
-                        Box(Modifier.weight(1f)) {
-                            if (query.isEmpty()) Text("歌曲 / 歌手 / 专辑", color = colors.textTertiary, fontSize = 14.sp)
-                            BasicTextField(
-                                value = query,
-                                onValueChange = { query = it },
-                                singleLine = true,
-                                textStyle = TextStyle(color = colors.textPrimary, fontSize = 14.sp),
-                                cursorBrush = SolidColor(colors.accent),
-                                modifier = Modifier.fillMaxWidth(),
-                            )
+            item(key = "header") {
+                Column(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp)) {
+                    // 顶栏行：返回 + 标题 + 下载（选择模式中变 ✕）
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        Box(
+                            Modifier.size(42.dp)
+                                .shadePressable(cornerRadius = 21.dp, offset = 4.dp, blur = 6.dp, onClick = onBack),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = colors.accent, modifier = Modifier.size(19.dp))
                         }
-                        if (query.isNotEmpty()) {
+                        Text(
+                            "搜索", Modifier.weight(1f),
+                            color = colors.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
+                        )
+                        if (selecting || (searchedQuery != null && SearchTab.entries[tab] == SearchTab.SONGS)) {
                             Box(
-                                Modifier.size(26.dp).flatPressable(cornerRadius = 13.dp) {
-                                    query = ""
-                                    searchedQuery = null   // 清空后回到历史列表
-                                },
+                                Modifier.size(42.dp)
+                                    .shadePressable(cornerRadius = 21.dp, offset = 4.dp, blur = 6.dp) {
+                                        if (selecting) {
+                                            selecting = false
+                                            selectedMids.clear()
+                                        } else {
+                                            selecting = true
+                                        }
+                                    },
                                 contentAlignment = Alignment.Center,
                             ) {
-                                Icon(Icons.Filled.Close, "清除", tint = colors.textTertiary, modifier = Modifier.size(14.dp))
+                                Crossfade(selecting, animationSpec = tween(160), label = "dlIcon") { sel ->
+                                    Icon(
+                                        if (sel) Icons.Filled.Close else Icons.Filled.Download,
+                                        if (sel) "退出选择" else "选择下载",
+                                        tint = colors.accent, modifier = Modifier.size(20.dp),
+                                    )
+                                }
                             }
                         }
                     }
-                }
-                Box(
-                    Modifier.size(50.dp).shadePressable(cornerRadius = 18.dp, offset = 4.dp, blur = 7.dp) { doSearch() },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (loading) {
-                        androidx.compose.material3.CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = colors.accent,
-                        )
-                    } else {
-                        Icon(Icons.Filled.Search, "搜索", tint = colors.accent, modifier = Modifier.size(20.dp))
-                    }
-                }
-            }
-            Spacer(Modifier.height(14.dp))
-
-            val q = searchedQuery
-            when {
-                error != null && q != null -> Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    Text(error!!, color = colors.textSecondary, fontSize = 13.sp)
-                }
-                q != null -> {
-                    // 标签栏：融合式（与列表连成一块）
-                    val tabs = SearchTab.entries
-                    Column(Modifier.weight(1f)) {
-                        ShadeFusedTabs(
-                            tabCount = tabs.size,
-                            selectedIndex = tab,
-                            tabHeight = 44.dp,
-                            cornerRadius = 18.dp,
+                    Spacer(Modifier.height(14.dp))
+                    // 搜索框（凹陷轨道；内部按钮只能「平」）
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .height(50.dp)
+                                .shadeInset(cornerRadius = 18.dp, offset = 3.dp, blur = 5.dp)
+                                .padding(horizontal = 14.dp),
+                            contentAlignment = Alignment.CenterStart,
                         ) {
-                            Column(Modifier.fillMaxSize()) {
-                                Row(Modifier.fillMaxWidth().height(44.dp)) {
-                                    tabs.forEachIndexed { i, t ->
-                                        ShadeFusedTab(
-                                            label = t.label,
-                                            selected = i == tab,
-                                            modifier = Modifier.weight(1f),
-                                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.Search, null, tint = colors.textTertiary, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.size(8.dp))
+                                Box(Modifier.weight(1f)) {
+                                    if (query.isEmpty()) Text("歌曲 / 歌手 / 专辑", color = colors.textTertiary, fontSize = 14.sp)
+                                    BasicTextField(
+                                        value = query,
+                                        onValueChange = { query = it },
+                                        singleLine = true,
+                                        textStyle = TextStyle(color = colors.textPrimary, fontSize = 14.sp),
+                                        cursorBrush = SolidColor(colors.accent),
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+                                }
+                                if (query.isNotEmpty()) {
+                                    Box(
+                                        Modifier.size(26.dp).flatPressable(cornerRadius = 13.dp) {
+                                            query = ""
+                                            searchedQuery = null   // 清空后回到历史列表
+                                        },
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(Icons.Filled.Close, "清除", tint = colors.textTertiary, modifier = Modifier.size(14.dp))
+                                    }
+                                }
+                            }
+                        }
+                        Box(
+                            Modifier.size(50.dp).shadePressable(cornerRadius = 18.dp, offset = 4.dp, blur = 7.dp) { doSearch() },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (loading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = colors.accent,
+                                )
+                            } else {
+                                Icon(Icons.Filled.Search, "搜索", tint = colors.accent, modifier = Modifier.size(20.dp))
+                            }
+                        }
+                    }
+                    // 标签栏：平的分段控制（选中=凹陷圆角矩形，同歌手页分段控制器）
+                    if (searchedQuery != null) {
+                        Spacer(Modifier.height(12.dp))
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            SearchTab.entries.forEachIndexed { i, t ->
+                                val sel = i == tab
+                                Box(
+                                    Modifier
+                                        .then(if (sel) Modifier.shadeInset(cornerRadius = 13.dp, offset = 2.dp, blur = 4.dp) else Modifier)
+                                        .flatPressable(cornerRadius = 13.dp) {
                                             tab = i
-                                            loadTab(t, q)
+                                            loadTab(t, searchedQuery ?: return@flatPressable)
                                             if (t != SearchTab.SONGS && selecting) {
                                                 selecting = false; selectedMids.clear()
                                             }
                                         }
-                                    }
-                                }
-                                Box(Modifier.weight(1f)) {
-                                    // 结果列表上下边缘渐隐
-                                    VerticalEdgeFades(state = listState, height = 26.dp)
-                                    val current = tabs[tab]
-                                    if (loading && !hasAnyResult(current, songResults, singerResults, albumResults, playlistResults)) {
-                                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                            androidx.compose.material3.CircularProgressIndicator(
-                                                modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = colors.accent,
-                                            )
-                                        }
-                                    } else {
-                                        SearchResults(
-                                            tab = current,
-                                            songs = songResults,
-                                            singers = singerResults,
-                                            albums = albumResults,
-                                            playlists = playlistResults,
-                                            likedIds = likedIds,
-                                            downloadedMap = downloadedMap,
-                                            selecting = selecting,
-                                            selectedMids = selectedMids,
-                                            listState = listState,
-                                            onPlayQueue = { list, i -> playQueue(context, list, i) },
-                                            onLike = { t, liked -> toggleLike(context, t, liked) },
-                                            onMore = { moreTrack = it },
-                                            onToggleSelect = { t ->
-                                                if (t.mid in selectedMids) selectedMids.remove(t.mid)
-                                                else selectedMids.add(t.mid)
-                                            },
-                                            onOpenAlbum = onOpenAlbum,
-                                        )
-                                    }
+                                        .padding(horizontal = 15.dp, vertical = 8.dp),
+                                ) {
+                                    Text(
+                                        t.label,
+                                        color = if (sel) colors.accent else colors.textSecondary,
+                                        fontSize = 14.sp,
+                                        fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Medium,
+                                    )
                                 }
                             }
                         }
+                    }
+                }
+            }
+            val q = searchedQuery
+            when {
+                error != null && q != null -> item(key = "error") {
+                    Box(Modifier.fillMaxWidth().padding(vertical = 48.dp), contentAlignment = Alignment.Center) {
+                        Text(error!!, color = colors.textSecondary, fontSize = 13.sp)
+                    }
+                }
+                q != null -> {
+                    val current = SearchTab.entries[tab]
+                    if (loading && !hasAnyResult(current, songResults, singerResults, albumResults, playlistResults)) {
+                        item(key = "loading") {
+                            Box(Modifier.fillMaxWidth().padding(vertical = 64.dp), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = colors.accent)
+                            }
+                        }
+                    } else {
+                        searchResultItems(
+                            tab = current,
+                            songs = songResults,
+                            singers = singerResults,
+                            albums = albumResults,
+                            playlists = playlistResults,
+                            likedIds = likedIds,
+                            downloadedMap = downloadedMap,
+                            selecting = selecting,
+                            selectedMids = selectedMids,
+                            onPlayQueue = { list, i -> playQueue(context, list, i) },
+                            onLike = { t, liked -> toggleLike(context, t, liked) },
+                            onMore = { moreTrack = it },
+                            onToggleSelect = { t ->
+                                if (t.mid in selectedMids) selectedMids.remove(t.mid)
+                                else selectedMids.add(t.mid)
+                            },
+                            onOpenAlbum = onOpenAlbum,
+                            onOpenSinger = onOpenSinger,
+                            screenWidth = screenWidth,
+                        )
                     }
                 }
                 else -> {
                     // 搜索历史：仅当确有历史时才出现（用户要求：没有历史就什么都不显示）。
                     if (history.isNotEmpty()) {
-                        LazyColumn(Modifier.weight(1f)) {
-                            item {
+                        item(key = "history") {
+                            Column(Modifier.padding(horizontal = 16.dp)) {
                                 TrackListBlock {
-                                    // 头行：标题 + 清空全部
                                     Row(
                                         Modifier.fillMaxWidth()
                                             .padding(horizontal = 14.dp, vertical = 10.dp),
@@ -325,7 +387,6 @@ fun SearchScreen(
                                                 .padding(horizontal = 14.dp, vertical = 2.dp),
                                             verticalAlignment = Alignment.CenterVertically,
                                         ) {
-                                            // 词：点击即搜
                                             Row(
                                                 Modifier.weight(1f)
                                                     .flatPressable(cornerRadius = 12.dp) {
@@ -349,7 +410,6 @@ fun SearchScreen(
                                                     overflow = TextOverflow.Ellipsis,
                                                 )
                                             }
-                                            // 单条删除
                                             Box(
                                                 Modifier.size(34.dp)
                                                     .flatPressable(cornerRadius = 17.dp) {
@@ -368,75 +428,51 @@ fun SearchScreen(
                                     }
                                 }
                             }
-                            item { Spacer(Modifier.height(124.dp)) }
                         }
                     }
-                    // 没有历史：什么都不显示（连"搜一首想听的歌吧"也不出，按用户要求）
                 }
             }
         }
+        // 顶部渐隐：盖过系统状态栏、范围加大；底部与主页同款
+        if (listState.canScrollBackward) TopEdgeFade()
+        VerticalEdgeFades(state = listState, height = 26.dp, top = false)
 
-        // 顶栏：普通 ↔ 选择（歌曲标签下才给下载钮）
-        val downloadRot = downloadIconRotation(selecting)
-        TopBarContentSwitch(
-            selecting = selecting,
-            modifier = Modifier.align(Alignment.TopCenter).zIndex(2f),
-            normal = {
-                CollapsingTopBar(
-                    title = "搜索",
-                    onBack = onBack,
-                    visible = barVisible,
-                    trailing = {
-                        if (searchedQuery != null && SearchTab.entries[tab] == SearchTab.SONGS) {
-                            Box(
-                                Modifier
-                                    .size(42.dp)
-                                    .graphicsLayer { rotationZ = downloadRot }
-                                    .shadePressable(cornerRadius = 21.dp, offset = 4.dp, blur = 6.dp) {
-                                        selecting = !selecting
-                                        if (!selecting) selectedMids.clear()
-                                    },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Icon(Icons.Filled.Download, "选择下载", tint = colors.accent, modifier = Modifier.size(20.dp))
-                            }
+        // 选择模式：底部工具栏上升出现（全选/反选/下载三图标钮）；退出时下滑消失
+        AnimatedVisibility(
+            visible = selecting,
+            enter = slideInVertically(tween(300, easing = FastOutSlowInEasing)) { it } + fadeIn(tween(180)),
+            exit = slideOutVertically(tween(240)) { it } + fadeOut(tween(150)),
+            modifier = Modifier.align(Alignment.BottomCenter).zIndex(2f),
+        ) {
+            SelectionBar(
+                selectedCount = selectedMids.size,
+                downloading = downloadProgress,
+                onSelectAll = {
+                    selectedMids.clear()
+                    songResults?.filter { !downloadedMap.containsKey(it.mid) }
+                        ?.forEach { selectedMids.add(it.mid) }
+                },
+                onInvert = {
+                    val invert = songResults.orEmpty()
+                        .filter { !downloadedMap.containsKey(it.mid) }
+                        .map { it.mid to (it.mid !in selectedMids) }
+                    selectedMids.clear()
+                    invert.forEach { (mid, sel) -> if (sel) selectedMids.add(mid) }
+                },
+                onDownload = {
+                    scope.launch {
+                        val picks = songResults.orEmpty().filter { it.mid in selectedMids }
+                        picks.forEachIndexed { idx, t ->
+                            downloadProgress = "${idx + 1}/${picks.size}"
+                            runCatching { Downloader.download(context, t) }
                         }
-                    },
-                )
-            },
-            selection = {
-                SelectionBar(
-                    selecting = selecting,
-                    selectedCount = selectedMids.size,
-                    downloading = downloadProgress,
-                    onSelectAll = {
+                        downloadProgress = null
                         selectedMids.clear()
-                        songResults?.filter { !downloadedMap.containsKey(it.mid) }
-                            ?.forEach { selectedMids.add(it.mid) }
-                    },
-                    onInvert = {
-                        val invert = songResults.orEmpty()
-                            .filter { !downloadedMap.containsKey(it.mid) }
-                            .map { it.mid to (it.mid !in selectedMids) }
-                        selectedMids.clear()
-                        invert.forEach { (mid, sel) -> if (sel) selectedMids.add(mid) }
-                    },
-                    onCancel = { selecting = false; selectedMids.clear() },
-                    onDownload = {
-                        scope.launch {
-                            val picks = songResults.orEmpty().filter { it.mid in selectedMids }
-                            picks.forEachIndexed { idx, t ->
-                                downloadProgress = "${idx + 1}/${picks.size}"
-                                runCatching { Downloader.download(context, t) }
-                            }
-                            downloadProgress = null
-                            selectedMids.clear()
-                            selecting = false
-                        }
-                    },
-                )
-            },
-        )
+                        selecting = false
+                    }
+                },
+            )
+        }
     }
 
     // 弹窗
@@ -473,8 +509,11 @@ private fun hasAnyResult(
 }
 
 /** 按当前标签渲染结果；歌曲 = 整块列表，其余 = 整块行列表。 */
-@Composable
-private fun SearchResults(
+/**
+ * 搜索结果条目（LazyListScope 扩展，2026-09-30 改版）：与页头同在一个 LazyColumn，
+ * 滚动位置统一；歌手/专辑/歌单为卡片网格（歌手卡限宽 300dp 居中）。
+ */
+private fun androidx.compose.foundation.lazy.LazyListScope.searchResultItems(
     tab: SearchTab,
     songs: List<Track>?,
     singers: List<SearchSinger>?,
@@ -484,20 +523,21 @@ private fun SearchResults(
     downloadedMap: Map<String, com.neumusic.player.data.DownloadRecord>,
     selecting: Boolean,
     selectedMids: List<String>,
-    listState: androidx.compose.foundation.lazy.LazyListState,
     onPlayQueue: (List<Track>, Int) -> Unit,
     onLike: (Track, Boolean) -> Unit,
     onMore: (Track) -> Unit,
     onToggleSelect: (Track) -> Unit,
     onOpenAlbum: (AlbumItem) -> Unit,
+    onOpenSinger: (SearchSinger, androidx.compose.ui.geometry.Rect) -> Unit,
+    screenWidth: androidx.compose.ui.unit.Dp,
 ) {
-    LazyColumn(state = listState, modifier = Modifier.fillMaxSize().doubleTapToTop(listState)) {
-        when (tab) {
-            SearchTab.SONGS -> {
-                val list = songs.orEmpty()
-                if (list.isEmpty()) {
-                    item { EmptyText("没有找到相关歌曲") }
-                } else item {
+    when (tab) {
+        SearchTab.SONGS -> {
+            val list = songs.orEmpty()
+            if (list.isEmpty()) {
+                item { EmptyText("没有找到相关歌曲") }
+            } else item {
+                Column(Modifier.padding(horizontal = 16.dp)) {
                     TrackListBlock {
                         list.forEachIndexed { i, track ->
                             if (i > 0) RowDivider()
@@ -516,52 +556,61 @@ private fun SearchResults(
                     }
                 }
             }
-            SearchTab.SINGERS -> {
-                val list = singers.orEmpty()
-                if (list.isEmpty()) item { EmptyText("没有找到相关歌手") }
-                else item {
-                    TrackListBlock {
-                        list.forEachIndexed { i, s ->
-                            if (i > 0) RowDivider()
-                            SimpleRow(title = s.name, subtitle = "歌曲 ${s.songNum} · 专辑 ${s.albumNum}", logo = s.pic)
-                        }
-                    }
-                }
-            }
-            SearchTab.ALBUMS -> {
-                val list = albums.orEmpty()
-                if (list.isEmpty()) item { EmptyText("没有找到相关专辑") }
-                else item {
-                    TrackListBlock {
-                        list.forEachIndexed { i, a ->
-                            if (i > 0) RowDivider()
-                            SimpleRow(
-                                title = a.name,
-                                subtitle = buildString {
-                                    append(if (a.singerName.isNotEmpty()) a.singerName else "专辑")
-                                    if (a.songnum > 0) append(" · ${a.songnum} 首")
-                                },
-                                logo = a.logo,
-                                onClick = { onOpenAlbum(a) },
-                            )
-                        }
-                    }
-                }
-            }
-            SearchTab.PLAYLISTS -> {
-                val list = playlists.orEmpty()
-                if (list.isEmpty()) item { EmptyText("没有找到相关歌单") }
-                else item {
-                    TrackListBlock {
-                        list.forEachIndexed { i, p ->
-                            if (i > 0) RowDivider()
-                            SimpleRow(title = p.name, subtitle = "${p.songnum} 首", logo = p.logo)
-                        }
-                    }
+        }
+        // 歌手：一行一张大卡（宽屏自适应多张）。点卡片进歌手页时带上卡片自身坐标——
+        // 「飞位」共享元素转场（卡片飞到歌手页头像位，其余元素淡出/浮现）需要起点。
+        SearchTab.SINGERS -> {
+            val list = singers.orEmpty()
+            if (list.isEmpty()) item { EmptyText("没有找到相关歌手") }
+            else cardGridItems(
+                items = list,
+                columns = gridColumns(screenWidth, minCard = 300.dp),
+                key = { it.mid },
+                maxCardWidth = 300.dp,
+                horizontalPadding = 16.dp,
+            ) { s ->
+                var cardBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+                Box(
+                    Modifier
+                        .onGloballyPositioned { cardBounds = it.boundsInRoot() }
+                        .fillMaxWidth(),
+                ) {
+                    SingerCard(
+                        name = s.name, pic = s.pic, songNum = s.songNum, albumNum = s.albumNum,
+                        onClick = { cardBounds?.let { r -> onOpenSinger(s, r) } },
+                    )
                 }
             }
         }
-        item { Spacer(Modifier.height(124.dp)) }
+        // 专辑/歌单：歌手页同款的封面卡网格
+        SearchTab.ALBUMS -> {
+            val list = albums.orEmpty()
+            if (list.isEmpty()) item { EmptyText("没有找到相关专辑") }
+            else cardGridItems(
+                items = list,
+                columns = gridColumns(screenWidth, minCard = 170.dp),
+                key = { it.mid },
+                horizontalPadding = 16.dp,
+            ) { a ->
+                MediaCard(
+                    logo = a.logo, title = a.name, count = a.songnum,
+                    line2 = a.singerName.ifEmpty { null },
+                    onClick = { onOpenAlbum(a) },
+                )
+            }
+        }
+        SearchTab.PLAYLISTS -> {
+            val list = playlists.orEmpty()
+            if (list.isEmpty()) item { EmptyText("没有找到相关歌单") }
+            else cardGridItems(
+                items = list,
+                columns = gridColumns(screenWidth, minCard = 170.dp),
+                key = { it.tid.toString() },
+                horizontalPadding = 16.dp,
+            ) { p ->
+                MediaCard(logo = p.logo, title = p.name, count = p.songnum, line2 = null)
+            }
+        }
     }
 }
 
@@ -573,30 +622,3 @@ private fun EmptyText(text: String) {
     }
 }
 
-/** 歌手/专辑/歌单的行（平面按压；位于整块凸起内）。 */
-@Composable
-private fun SimpleRow(
-    title: String,
-    subtitle: String,
-    logo: String,
-    onClick: (() -> Unit)? = null,
-) {
-    val colors = LocalShadeColors.current
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .then(if (onClick != null) Modifier.flatPressable(cornerRadius = 14.dp, onClick = onClick) else Modifier)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        AlbumArt(logo, 48.dp)
-        Column(Modifier.weight(1f)) {
-            Text(
-                title, color = colors.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium,
-                maxLines = 1, overflow = TextOverflow.Ellipsis,
-            )
-            Text(subtitle, color = colors.textSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-    }
-}

@@ -15,11 +15,20 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.border
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import com.neumusic.player.data.AppLog
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -32,7 +41,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -75,6 +87,13 @@ fun SettingsScreen(onBack: () -> Unit) {
     var downloadDir by remember { mutableStateOf(Prefs.downloadDir) }
     var downloadQuality by remember { mutableStateOf(Prefs.downloadQuality) }
     var barViz by remember { mutableStateOf(Prefs.barViz) }
+    var vinyl by remember { mutableStateOf(Prefs.vinylMode) }
+    var logging by remember { mutableStateOf(Prefs.loggingEnabled) }
+    var logMaxMbText by remember { mutableStateOf(Prefs.logMaxMb.toString()) }
+    var logCleared by remember { mutableStateOf(false) }
+    val exportLogs = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
+        uri?.let { AppLog.exportTo(context.contentResolver, it) }
+    }
 
     if (showWebLogin) {
         WebLoginOverlay(
@@ -334,6 +353,97 @@ fun SettingsScreen(onBack: () -> Unit) {
                     "在底部播放栏显示随音乐起伏的电平条。",
                     fontSize = 11.sp, color = colors.textTertiary, modifier = Modifier.padding(8.dp),
                 )
+
+                Spacer(Modifier.height(4.dp))
+
+                // 黑胶唱片模式（用户请我取名：封面按唱片机样式呈现）
+                Text(
+                    "播放页", fontSize = 13.sp, color = colors.textSecondary,
+                    modifier = Modifier.padding(start = 6.dp),
+                )
+                ChoiceRow(
+                    label = "黑胶唱片模式",
+                    selected = vinyl,
+                    onClick = { Prefs.vinylMode = !vinyl; vinyl = !vinyl },
+                )
+                Text(
+                    "封面按唱片机样式呈现：画框加宽并刻上细密的唱片纹路，播放时唱片缓缓旋转，阴影保持不动。",
+                    fontSize = 11.sp, color = colors.textTertiary, modifier = Modifier.padding(8.dp),
+                )
+            }
+            Spacer(Modifier.height(18.dp))
+
+            // ── 诊断日志（2026-09-30 规格）：结构化、可开关、可清空、可限容、可导出 ──
+            SectionTitle("诊断日志")
+            Column(
+                Modifier.fillMaxWidth()
+                    .shadeSurface(cornerRadius = 24.dp, offset = 6.dp, blur = 10.dp)
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                ChoiceRow(
+                    label = "启用诊断日志",
+                    selected = logging,
+                    onClick = { Prefs.loggingEnabled = !logging; logging = !logging },
+                )
+                Text(
+                    "记录推荐/播放/收藏等关键请求的结构化日志；关闭后完全静默。超上限自动裁掉较早的一半。",
+                    fontSize = 11.sp, color = colors.textTertiary, modifier = Modifier.padding(8.dp),
+                )
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    // 清空：圆形凸起 + 垃圾桶
+                    Box(
+                        Modifier.size(46.dp)
+                            .shadePressable(cornerRadius = 23.dp, offset = 4.dp, blur = 7.dp) {
+                                AppLog.clear()
+                                logCleared = true
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Filled.Delete, "清空日志", tint = colors.accent, modifier = Modifier.size(20.dp))
+                    }
+                    // 导出：凸起按钮
+                    Box(
+                        Modifier.shadePressable(cornerRadius = 14.dp, offset = 4.dp, blur = 7.dp) {
+                            exportLogs.launch("neumusic-diagnostics.log")
+                        }.padding(horizontal = 16.dp, vertical = 12.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Filled.FileDownload, null, tint = colors.accent, modifier = Modifier.size(17.dp))
+                            Text("导出日志", color = colors.accent, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        }
+                    }
+                    Spacer(Modifier.weight(1f))
+                    // 容量上限：凹陷圆角数字框，单位 MB
+                    Row(
+                        Modifier
+                            .width(120.dp)
+                            .shadeInset(cornerRadius = 12.dp, offset = 3.dp, blur = 5.dp)
+                            .padding(horizontal = 10.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        BasicTextField(
+                            value = logMaxMbText,
+                            onValueChange = { v ->
+                                logMaxMbText = v.filter { it.isDigit() }.take(2)
+                                logMaxMbText.toIntOrNull()?.let { Prefs.logMaxMb = it }
+                            },
+                            singleLine = true,
+                            textStyle = TextStyle(color = colors.textPrimary, fontSize = 13.sp, textAlign = TextAlign.End),
+                            cursorBrush = SolidColor(colors.accent),
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text("MB", color = colors.textTertiary, fontSize = 11.sp, modifier = Modifier.padding(start = 5.dp))
+                    }
+                }
+                if (logCleared) {
+                    Text("已清空", fontSize = 11.sp, color = colors.textTertiary, modifier = Modifier.padding(8.dp))
+                }
             }
             Spacer(Modifier.height(18.dp))
 

@@ -6,6 +6,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,12 +20,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Equalizer
@@ -42,6 +37,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -52,12 +48,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.neumusic.player.data.Lyrics
@@ -71,15 +69,19 @@ import com.neumusic.player.shade.shadeInset
 import com.neumusic.player.shade.shadeSurface
 import com.neumusic.player.shade.shadePressable
 import com.neumusic.player.ui.common.AlbumArt
+import com.neumusic.player.ui.common.QueueDialog
+import com.neumusic.player.ui.common.VIZ_BARS
 import com.neumusic.player.ui.common.toastMain
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
@@ -97,8 +99,16 @@ import androidx.compose.foundation.layout.BoxScope
 import com.neumusic.player.shade.flatPressable
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.automirrored.filled.List
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
 
-/** 播放页（覆盖主页）。[onBack] 由外层驱动下滑动画。左右滑动切换封面页 / 歌词页。 */
+/** 播放页显示模式（0 纯封面 / 1 封面+歌词 / 2 纯歌词）。跨「关闭再打开播放页」保持——覆盖层会销毁重组，记忆放在单例里。 */
+object PlayerUi {
+    var displayMode by androidx.compose.runtime.mutableIntStateOf(0)
+}
+
+/** 播放页（覆盖主页）。[onBack] 由外层驱动下滑动画。上下滑切换 纯封面/封面+歌词/纯歌词 三模式。 */
 @Composable
 fun PlayerScreen(onBack: () -> Unit, onOpenEqualizer: () -> Unit = {}) {
     val colors = LocalShadeColors.current
@@ -131,8 +141,6 @@ fun PlayerScreen(onBack: () -> Unit, onOpenEqualizer: () -> Unit = {}) {
     var dragFrac by remember { mutableFloatStateOf(0f) }
     var barWidth by remember { mutableFloatStateOf(1f) }
     var showQueue by remember { mutableStateOf(false) }
-
-    val pager = rememberPagerState(pageCount = { 2 })
 
     // 进度轮询（ExoPlayer 无 Flow，用轻量轮询足够）。
     LaunchedEffect(track) {
@@ -176,12 +184,62 @@ fun PlayerScreen(onBack: () -> Unit, onOpenEqualizer: () -> Unit = {}) {
             RoundIconButton(Icons.Filled.Equalizer, "均衡器", 46.dp) { onOpenEqualizer() }
         }
 
-        // 左右滑动：第 0 页封面，第 1 页歌词。
-        HorizontalPager(
-            state = pager,
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-        ) { page ->
-            if (page == 0) {
+        // ── 三模式容器（用户 2026-09-30 规格）：纯封面(0) / 封面+歌词(1) / 纯歌词(2)。
+        // 上滑前进、下滑后退，**一次手势最多走一级**（纯封面↔纯歌词不直连）。
+        // 进度 modeT 是连续值：封面随它上移/缩小/淡出，歌词面板从底部升起、长高到全屏；
+        // 逐帧值只在 graphicsLayer/layout lambda 里读（derivedStateOf 门控的布尔才会重组）。
+        // 纯歌词模式下竖直拖动由歌词列表正常消费（浏览歌词）；到顶继续下拉由 LyricsView
+        // 的 nestedScroll 连接回传收起（2→1）。──
+        val modeT = remember { Animatable(PlayerUi.displayMode.toFloat()) }
+        var dragBase by remember { mutableFloatStateOf(0f) }
+        val fullLyrics by remember { derivedStateOf { modeT.value >= 1.5f } }
+        fun settleMode() {
+            scope.launch {
+                val m = modeT.value.roundToInt().coerceIn(0, 2)
+                PlayerUi.displayMode = m
+                modeT.animateTo(m.toFloat(), tween(240, easing = FastOutSlowInEasing))
+            }
+        }
+        Box(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures(
+                        onDragStart = { dragBase = modeT.value },
+                        onVerticalDrag = { change, dy ->
+                            change.consume()
+                            scope.launch {
+                                val step = (size.height * 0.42f).coerceAtLeast(1f)
+                                modeT.snapTo(
+                                    (modeT.value - dy / step)
+                                        .coerceIn(dragBase - 1f, dragBase + 1f)
+                                        .coerceIn(0f, 2f),
+                                )
+                            }
+                        },
+                        onDragEnd = { settleMode() },
+                        onDragCancel = { settleMode() },
+                    )
+                },
+        ) {
+            // 封面（含曲名/歌手）：随进度上移、缩小；1→2 段淡出消失
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        val t = modeT.value
+                        val step1 = min(t, 1f)
+                        val step2 = max(0f, t - 1f)
+                        val miniH = 180.dp.toPx()
+                        translationY = -(miniH / 2f) * step1 - size.height * 0.22f * step2
+                        val s = 1f - 0.22f * step1 - 0.1f * step2
+                        scaleX = s
+                        scaleY = s
+                        alpha = (1f - step2 * 1.6f).coerceIn(0f, 1f)
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
                 CoverPage(
                     trackName = track?.name,
                     singer = track?.singer.orEmpty(),
@@ -189,35 +247,62 @@ fun PlayerScreen(onBack: () -> Unit, onOpenEqualizer: () -> Unit = {}) {
                     playing = playing,
                     levels = vizLevels,
                 )
-            } else {
-                LyricsView(
-                    lyrics = lyrics,
-                    positionMs = pos,
-                    textSize = lyricSize,
-                    showTranslation = showTrans && (lyrics?.hasTranslation == true),
-                    showRoman = showRoman && (lyrics?.hasRoman == true),
-                    showKana = showKana && (lyrics?.hasKana == true),
-                    // 只有当前曲目真有对应数据时才给按钮
-                    canToggleTranslation = lyrics?.hasTranslation == true,
-                    canToggleRoman = lyrics?.hasRoman == true,
-                    canToggleKana = lyrics?.hasKana == true,
-                    onToggleTranslation = {
-                        val next = !showTrans
-                        Prefs.showLyricTranslation = next
-                        showTrans = next
-                    },
-                    onToggleRoman = {
-                        val next = !showRoman
-                        Prefs.showLyricRoman = next
-                        showRoman = next
-                    },
-                    onToggleKana = {
-                        val next = !showKana
-                        Prefs.showLyricKana = next
-                        showKana = next
-                    },
-                )
             }
+            // 歌词面板：0→1 从底部升起并长到三行迷你（带翻译/注音位）；1→2 长到全屏
+            LyricsView(
+                lyrics = lyrics,
+                positionMs = pos,
+                textSize = lyricSize,
+                showTranslation = showTrans && (lyrics?.hasTranslation == true),
+                showRoman = showRoman && (lyrics?.hasRoman == true),
+                showKana = showKana && (lyrics?.hasKana == true),
+                // 只有当前曲目真有对应数据时才给按钮
+                canToggleTranslation = lyrics?.hasTranslation == true,
+                canToggleRoman = lyrics?.hasRoman == true,
+                canToggleKana = lyrics?.hasKana == true,
+                onToggleTranslation = {
+                    val next = !showTrans
+                    Prefs.showLyricTranslation = next
+                    showTrans = next
+                },
+                onToggleRoman = {
+                    val next = !showRoman
+                    Prefs.showLyricRoman = next
+                    showRoman = next
+                },
+                onToggleKana = {
+                    val next = !showKana
+                    Prefs.showLyricKana = next
+                    showKana = next
+                },
+                userScrollEnabled = fullLyrics,
+                onPullDownCollapse = if (fullLyrics) {
+                    {
+                        PlayerUi.displayMode = 1
+                        scope.launch { modeT.animateTo(1f, tween(240, easing = FastOutSlowInEasing)) }
+                    }
+                } else null,
+                showToggles = fullLyrics,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .layout { measurable, constraints ->
+                        val t = modeT.value
+                        val mini = 180.dp.roundToPx()
+                        val full = constraints.maxHeight
+                        val grow = (t - 1f).coerceIn(0f, 1f)
+                        val h = (mini + ((full - mini) * grow).roundToInt())
+                            .times(min(t, 1f)).roundToInt()
+                            .coerceIn(1, full)
+                        val placeable = measurable.measure(
+                            constraints.copy(minHeight = h, maxHeight = h),
+                        )
+                        layout(placeable.width, constraints.maxHeight) {
+                            // 面板底边始终贴容器底：升起=高度变大，顶边随之上升
+                            placeable.placeRelative(0, constraints.maxHeight - h)
+                        }
+                    }
+                    .graphicsLayer { alpha = (modeT.value * 1.6f).coerceIn(0f, 1f) },
+            )
         }
 
         // 直线进度条（用户要求：常见形式，放在播放按钮上方）
@@ -378,38 +463,7 @@ fun PlayerScreen(onBack: () -> Unit, onOpenEqualizer: () -> Unit = {}) {
     }
 }
 
-/** 队列弹窗：当前播放队列，点选跳播。 */
-@Composable
-private fun QueueDialog(tracks: List<com.neumusic.player.data.Track>, currentIndex: Int, onDismiss: () -> Unit, onPick: (Int) -> Unit) {
-    val colors = com.neumusic.player.shade.LocalShadeColors.current
-    com.neumusic.player.ui.common.ShadeDialog(title = "播放队列（${tracks.size} 首）", onDismiss = onDismiss) {
-        androidx.compose.foundation.lazy.LazyColumn(Modifier.height(360.dp)) {
-            itemsIndexed(tracks) { i, t ->
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .flatPressable(cornerRadius = 0.dp) { onPick(i) }
-                        .padding(horizontal = 20.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "${i + 1}.",
-                        color = if (i == currentIndex) colors.accent else colors.textTertiary,
-                        fontSize = 12.sp, modifier = Modifier.width(34.dp),
-                    )
-                    Text(
-                        t.name,
-                        color = if (i == currentIndex) colors.accent else colors.textPrimary,
-                        fontSize = 14.sp,
-                        fontWeight = if (i == currentIndex) FontWeight.SemiBold else FontWeight.Normal,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
-        }
-    }
-}
+/** 队列弹窗已提到 common（[com.neumusic.player.ui.common.QueueDialog]），播放栏与播放页共用。 */
 
 /** 凸起容器内的平面圆图标钮。 */
 @Composable
@@ -495,11 +549,13 @@ private fun CoverDisc(
     val colors = LocalShadeColors.current
     val animatedFrac by animateFloatAsState(frac, tween(160), label = "ringFrac")
     val ringMaxLen = RING_MAX_LEN
+    val vinyl by Prefs.vinylModeFlow.collectAsState()
 
-    // 自转：播放时持续旋转，暂停时停在当前角度。
+    // 自转：**只有黑胶模式开启且在播放时**才转（用户规格：关闭黑胶就是不转的普通圆盘）。
+    // 暂停时停在当前角度。
     val rotation = remember { Animatable(0f) }
-    LaunchedEffect(playing) {
-        if (playing) {
+    LaunchedEffect(playing, vinyl) {
+        if (playing && vinyl) {
             rotation.animateTo(
                 targetValue = rotation.value + 360f,
                 animationSpec = infiniteRepeatable(
@@ -516,16 +572,17 @@ private fun CoverDisc(
         Modifier.size(DISC_SIZE + (RING_GAP + RING_WIDTH) * 2),
         contentAlignment = Alignment.Center,
     ) {
-        // 频谱环：围绕圆盘的径向电平柱（播放条可视化的详情页形态）。
+        // 频谱环：围绕圆盘的径向电平柱（与播放栏封面的可视化同款、同频段数）。
+        // 电平源只有 VizHost.BARS(16) 段，这里按 VIZ_BARS(40) 根铺开（降采样映射）。
         Canvas(Modifier.fillMaxSize()) {
             val gap = RING_GAP.toPx()
             val discRadius = DISC_SIZE.toPx() / 2f
             val innerR = discRadius + gap
             val maxLen = ringMaxLen.toPx()
             val barW = 2.5.dp.toPx()
-            val n = levels.size
+            val n = VIZ_BARS
             for (i in 0 until n) {
-                val level = levels[i].coerceIn(0f, 1f)
+                val level = levels.getOrElse(i * levels.size / n) { 0f }.coerceIn(0f, 1f)
                 val shown = if (playing) level else level * 0.15f
                 val angle = -90f + 360f * i / n
                 // 从盘边缘向外伸出的径向柱
@@ -547,29 +604,66 @@ private fun CoverDisc(
             }
         }
 
-        // 凸起底盘 + 圆封面（裁成圆形）；随播放缓慢自转。
+        // 凸起底盘：**保持静止**——阴影不能跟着唱片转（用户规格），旋转只发生在盘面内容上。
         Box(
             Modifier
                 .size(DISC_SIZE)
-                .graphicsLayer { rotationZ = rotation.value }
                 .shadeSurface(cornerRadius = DISC_SIZE / 2, offset = 6.dp, blur = 12.dp),
             contentAlignment = Alignment.Center,
         ) {
-            if (coverUrl.isEmpty()) {
-                Box(
-                    Modifier.size(DISC_SIZE - 16.dp).clip(CircleShape).background(colors.background),
-                    contentAlignment = Alignment.Center,
-                ) { CoverPlaceholder() }
-            } else {
-                AsyncImage(
-                    model = coverUrl,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .size(DISC_SIZE - 16.dp)
-                        .clip(CircleShape)
-                        .background(colors.background),
-                )
+            // 黑胶模式（设置「黑胶唱片模式」）：画框变宽，其上一圈圈细凹环当唱片纹路
+            // （上缘吃进暗影、下缘吃进亮影 = 凹陷；环旋转对称，无需跟随自转）。
+            val vinyl by Prefs.vinylModeFlow.collectAsState()
+            if (vinyl) {
+                Canvas(Modifier.size(DISC_SIZE)) {
+                    val rMin = ((DISC_SIZE - 76.dp).toPx()) / 2f + 5.dp.toPx()
+                    val rMax = ((DISC_SIZE - 16.dp).toPx()) / 2f - 6.dp.toPx()
+                    val rings = 7
+                    val stroke = 0.8.dp.toPx()
+                    for (i in 0 until rings) {
+                        val f = i.toFloat() / (rings - 1)
+                        val r = rMin + (rMax - rMin) * f
+                        drawArc(
+                            color = colors.shadowDark.copy(alpha = 0.34f),
+                            startAngle = 180f, sweepAngle = 180f, useCenter = false,
+                            topLeft = Offset(size.width / 2f - r, size.height / 2f - r),
+                            size = Size(2f * r, 2f * r),
+                            style = Stroke(width = stroke, cap = StrokeCap.Round),
+                        )
+                        drawArc(
+                            color = colors.shadowLight.copy(alpha = 0.4f),
+                            startAngle = 0f, sweepAngle = 180f, useCenter = false,
+                            topLeft = Offset(size.width / 2f - r, size.height / 2f - r),
+                            size = Size(2f * r, 2f * r),
+                            style = Stroke(width = stroke, cap = StrokeCap.Round),
+                        )
+                    }
+                }
+            }
+            // 盘面内容（封面）：随播放缓慢自转；黑胶模式封面更小、画框更宽
+            val coverDiameter = if (vinyl) DISC_SIZE - 76.dp else DISC_SIZE - 16.dp
+            Box(
+                Modifier
+                    .size(coverDiameter)
+                    .graphicsLayer { rotationZ = rotation.value },
+                contentAlignment = Alignment.Center,
+            ) {
+                if (coverUrl.isEmpty()) {
+                    Box(
+                        Modifier.size(coverDiameter).clip(CircleShape).background(colors.background),
+                        contentAlignment = Alignment.Center,
+                    ) { CoverPlaceholder() }
+                } else {
+                    AsyncImage(
+                        model = coverUrl,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .size(coverDiameter)
+                            .clip(CircleShape)
+                            .background(colors.background),
+                    )
+                }
             }
         }
 

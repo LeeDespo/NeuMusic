@@ -1,5 +1,6 @@
 package com.neumusic.player.data.api
 
+import com.neumusic.player.data.AppLog
 import com.neumusic.player.data.Prefs
 import com.neumusic.player.data.Quality
 import com.neumusic.player.data.Track
@@ -69,6 +70,7 @@ object SongApi {
                 101404 -> sawThrottle = true
             }
         }
+        AppLog.w("Play", "playUrl failed: ${track.mid} lastResult=$lastResult")
         throw PlayUrlException(
             when {
                 // 连最便宜的档位都要会员，才下"无播放权限"的结论
@@ -110,6 +112,27 @@ object SongApi {
     }
 
     /**
+     * 歌曲介绍（详情页/推荐卡的介绍框）。端点 2026-09-30 curl 实测：
+     * `music.pf_song_detail_svr/get_song_detail_yqq`（匿名网页 comm 即可），param `{song_mid}`，
+     * 文案在 `data.info.intro.content[*].value`。没有介绍返回 null（调用方显示占位文案）。
+     */
+    suspend fun intro(mid: String): String? = runCatching {
+        val root = call(commWeb, "req_1" to Req(
+            "music.pf_song_detail_svr", "get_song_detail_yqq", JSONObject().put("song_mid", mid)))
+        val arr = data(root)?.optJSONObject("info")?.optJSONObject("intro")
+            ?.optJSONArray("content") ?: return@runCatching null
+        val sb = StringBuilder()
+        for (i in 0 until arr.length()) {
+            val v = arr.optJSONObject(i)?.optString("value").orEmpty()
+            if (v.isNotEmpty()) {
+                if (sb.isNotEmpty()) sb.append("\n")
+                sb.append(v)
+            }
+        }
+        sb.toString().takeIf { it.isNotBlank() }
+    }.getOrNull()
+
+    /**
      * 加/取消「我喜欢」（dirId 固定 201）。
      *
      * 两个必须守住的点：
@@ -132,6 +155,7 @@ object SongApi {
         // 成功要同时看外层 code 与内层 retCode，只看外层会误报。
         val retCode = data(root)?.optInt("retCode", -1) ?: -1
         val biz = QqCore.code(root)
+        if (biz != 0 || retCode != 0) AppLog.w("Like", "setLiked($liked) rejected: biz=$biz retCode=$retCode")
         return if (biz == 0 && retCode == 0) LikeResult.Success else LikeResult.Rejected(biz)
     }
 }
