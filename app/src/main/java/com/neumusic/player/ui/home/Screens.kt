@@ -47,6 +47,7 @@ import com.neumusic.player.data.api.PlaylistApi
 import com.neumusic.player.shade.LocalShadeColors
 import com.neumusic.player.shade.flatPressable
 import com.neumusic.player.shade.shadePressable
+import com.neumusic.player.ui.common.rememberPlayerBarSpace
 import com.neumusic.player.ui.common.AlbumArt
 import com.neumusic.player.ui.common.RowDivider
 import com.neumusic.player.ui.common.BlockRowSurface
@@ -583,6 +584,7 @@ private fun ListTopBarRow(title: String, onBack: () -> Unit, trailing: (@Composa
 /** 收藏的歌单列表（首页「更多」）。 */
 @Composable
 fun PlaylistsScreen(onBack: () -> Unit, onOpen: (PlaylistItem) -> Unit) {
+    val barSpace = rememberPlayerBarSpace()
     val colors = LocalShadeColors.current
     val playlistsState = rememberLazyListState()
     var items by remember { mutableStateOf<List<PlaylistItem>?>(null) }
@@ -593,7 +595,7 @@ fun PlaylistsScreen(onBack: () -> Unit, onOpen: (PlaylistItem) -> Unit) {
         Box(Modifier.fillMaxSize()) {
             LazyColumn(
                 state = playlistsState,
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 150.dp),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = barSpace),
             ) {
                 item(key = "topbar") { ListTopBarRow("收藏的歌单", onBack) }
                 item {
@@ -618,6 +620,7 @@ fun PlaylistsScreen(onBack: () -> Unit, onOpen: (PlaylistItem) -> Unit) {
 /** 收藏的专辑列表。 */
 @Composable
 fun AlbumsScreen(onBack: () -> Unit, onOpen: (AlbumItem) -> Unit) {
+    val barSpace = rememberPlayerBarSpace()
     val colors = LocalShadeColors.current
     val albumsState = rememberLazyListState()
     var items by remember { mutableStateOf<List<AlbumItem>?>(null) }
@@ -628,7 +631,7 @@ fun AlbumsScreen(onBack: () -> Unit, onOpen: (AlbumItem) -> Unit) {
         Box(Modifier.fillMaxSize()) {
             LazyColumn(
                 state = albumsState,
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 150.dp),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = barSpace),
             ) {
                 item(key = "topbar") { ListTopBarRow("收藏的专辑", onBack) }
                 item {

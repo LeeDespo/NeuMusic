@@ -65,6 +65,7 @@ import com.neumusic.player.player.PlayerHost
 import com.neumusic.player.shade.LocalShadeColors
 import com.neumusic.player.shade.LocalShadeShadowAlpha
 import com.neumusic.player.shade.shadeSurface
+import com.neumusic.player.ui.common.BottomBarMetrics
 import com.neumusic.player.ui.common.PlayerBar
 import com.neumusic.player.ui.common.SelectionBus
 import com.neumusic.player.ui.common.loadUrl
@@ -424,7 +425,10 @@ fun AppRoot() {
                     // 必须浮在推拉层(zIndex 3)之上——否则二级页面盖住播放栏（实测踩过）；
                     // 仍低于播放页覆盖层(4)
                     .zIndex(3.5f)
-                    .onSizeChanged { barHeightPx = it.height.toFloat() }
+                    .onSizeChanged {
+                        barHeightPx = it.height.toFloat()
+                        BottomBarMetrics.heightPx = it.height.toFloat()   // 各页面据此留出底部空白
+                    }
                     .graphicsLayer {
                         // 只在图层 lambda 里读进度：逐帧平移，零重组。
                         // 播放页/普通歌手页由底栏带出（锁步上升）；搜索卡「飞位」进入的
@@ -674,29 +678,13 @@ private fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t
 private fun SingerFlightCard(s: Nav.Singer, t: Animatable<Float, AnimationVector1D>) {
     val colors = LocalShadeColors.current
     Column {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .aspectRatio(1f)
-                .shadeSurface(cornerRadius = 20.dp, offset = 6.dp, blur = 12.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (s.pic.isEmpty()) {
-                Box(
-                    Modifier.fillMaxWidth().aspectRatio(1f).padding(10.dp)
-                        .clip(RoundedCornerShape(14.dp)).background(colors.background),
-                    contentAlignment = Alignment.Center,
-                ) { com.neumusic.player.ui.common.CoverPlaceholder() }
-            } else {
-                AsyncImage(
-                    model = s.pic,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxWidth().aspectRatio(1f).padding(10.dp)
-                        .clip(RoundedCornerShape(14.dp)).background(colors.background),
-                )
-            }
-        }
+        // 画框必须与歌手卡/歌手页头像用**同一个**按比例换算的组件，否则飞行的克隆卡
+        // 与它替换掉的原卡片画框粗细不一致（用户实测"过渡时能看到画框不统一"）。
+        com.neumusic.player.ui.common.SingerAvatarFrame(
+            pic = s.pic,
+            desc = "",
+            modifier = Modifier.fillMaxWidth(),
+        )
         Spacer(Modifier.height(10.dp))
         Text(
             s.name,

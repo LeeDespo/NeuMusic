@@ -71,18 +71,25 @@ fun BoxScope.HorizontalEdgeFades(
 }
 
 /**
- * 顶部渐隐（2026-09-30 规格）：**盖过系统状态栏**、范围更大（状态栏高度 + [extraHeight]）。
+ * 顶部渐隐（2026-10-01 规格）：**盖过系统状态栏**、范围更大（状态栏高度 + [extraHeight]）。
  * 放在页面根 Box 里、statusBarsPadding 子树之外，列表内容从状态栏底下滚过时先溶进底色。
  * 由调用方按 `canScrollBackward` 决定显隐（列表在顶部时不蒙灰）。
+ *
+ * 「彻底消失线」（内容开始模糊消失的界线）**在系统状态栏下缘再低一点点**——
+ * 状态栏那一条必须完全干净（沉浸式，内容不许从状态栏里透出来），
+ * 再往下 [belowStatusBar] 之后才开始渐隐。
  */
 @Composable
-fun BoxScope.TopEdgeFade(extraHeight: Dp = 48.dp, modifier: Modifier = Modifier) {
+fun BoxScope.TopEdgeFade(
+    extraHeight: Dp = 48.dp,
+    belowStatusBar: Dp = 8.dp,
+    modifier: Modifier = Modifier,
+) {
     val colors = LocalShadeColors.current
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val total = statusTop + extraHeight
-    // 「彻底消失线」在状态栏上缘：状态栏以上完全不透明（内容彻底消失），状态栏偏下还能
-    // 隐约看到渐隐中的内容，往下 48dp 内渐变到全透明（2026-09-30 用户规格）。
-    val solidAt = (statusTop / total).coerceIn(0.05f, 0.95f)
+    val solidEnd = (statusTop + belowStatusBar).coerceAtMost(total)
+    val solidAt = (solidEnd / total).coerceIn(0.05f, 0.95f)
     Box(
         modifier
             .align(Alignment.TopCenter)

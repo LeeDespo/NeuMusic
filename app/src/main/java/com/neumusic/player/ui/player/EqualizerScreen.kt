@@ -54,6 +54,7 @@ import com.neumusic.player.ui.common.ShadeDialog
 import com.neumusic.player.ui.common.ShadeDialogRow
 import com.neumusic.player.ui.common.toastMain
 import com.neumusic.player.ui.common.HorizontalShadeSlider
+import com.neumusic.player.ui.common.rememberPlayerBarSpace
 import com.neumusic.player.ui.common.ShadeSwitch
 import com.neumusic.player.ui.home.DetailTopBar
 
@@ -67,6 +68,7 @@ import com.neumusic.player.ui.home.DetailTopBar
 @Composable
 fun EqualizerScreen(onBack: () -> Unit) {
     val colors = LocalShadeColors.current
+    val barSpace = rememberPlayerBarSpace()
     val ctx = LocalContext.current
 
     if (!EqualizerHost.available.collectAsState().value) {
@@ -113,7 +115,8 @@ fun EqualizerScreen(onBack: () -> Unit) {
             DetailTopBar("音效", onBack, horizontalPadding = 16.dp)
             // ── 开关 ──
             Column(
-                Modifier.fillMaxWidth().shadeSurface(cornerRadius = 24.dp, offset = 6.dp, blur = 10.dp).padding(12.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                    .shadeSurface(cornerRadius = 24.dp, offset = 6.dp, blur = 10.dp).padding(12.dp),
             ) {
                 ToggleRow("启用均衡器", enabled) { EqualizerHost.setEnabled(!enabled) }
             }
@@ -332,7 +335,7 @@ fun EqualizerScreen(onBack: () -> Unit) {
                 )
             }
 
-            Spacer(Modifier.height(132.dp))   // 底部留白（播放栏）
+            Spacer(Modifier.height(24.dp + barSpace))   // 底部留白：播放栏实测高度
         }
     }
 
@@ -458,7 +461,8 @@ private fun AddPresetDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) 
 private fun SectionCard(title: String, content: @Composable () -> Unit) {
     val colors = LocalShadeColors.current
     Column(
-        Modifier.fillMaxWidth().shadeSurface(cornerRadius = 24.dp, offset = 6.dp, blur = 10.dp).padding(12.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                    .shadeSurface(cornerRadius = 24.dp, offset = 6.dp, blur = 10.dp).padding(12.dp),
     ) {
         Text(
             title, fontSize = 13.sp, color = colors.textSecondary,

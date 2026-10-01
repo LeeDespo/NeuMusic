@@ -311,15 +311,25 @@ object Prefs {
         get() = sp.getFloat("lightingNightWarm", -0.78f)
         set(v) = sp.edit().putFloat("lightingNightWarm", v.coerceIn(-1f, 1f)).apply()
 
-    /** 光影标定：最大偏移（dp，基准 10）。 */
-    var lightingMaxOffset: Float
-        get() = sp.getFloat("lightingMaxOffset", 10f)
-        set(v) = sp.edit().putFloat("lightingMaxOffset", v.coerceIn(0f, 40f)).apply()
+    /** 光影标定：暗色阴影最大偏移（dp，基准 6dp 组件；日出/日落处取到）。 */
+    var lightingDarkMax: Float
+        get() = sp.getFloat("lightingDarkMax", 10f)
+        set(v) = sp.edit().putFloat("lightingDarkMax", v.coerceIn(0f, 40f)).apply()
 
-    /** 光影标定：高光偏移相对暗影偏移的倍数（1 = 对称等长反向，0 = 高光不偏移）。 */
-    var lightingLightRatio: Float
-        get() = sp.getFloat("lightingLightRatio", 1f)
-        set(v) = sp.edit().putFloat("lightingLightRatio", v.coerceIn(0f, 2f)).apply()
+    /** 光影标定：暗色阴影最小偏移（dp；正午/午夜处取到）。 */
+    var lightingDarkMin: Float
+        get() = sp.getFloat("lightingDarkMin", 3.5f)
+        set(v) = sp.edit().putFloat("lightingDarkMin", v.coerceIn(0f, 40f)).apply()
+
+    /** 光影标定：高光阴影最大偏移（dp；与暗色阴影共用同一条曲线）。 */
+    var lightingLightMax: Float
+        get() = sp.getFloat("lightingLightMax", 5f)
+        set(v) = sp.edit().putFloat("lightingLightMax", v.coerceIn(0f, 40f)).apply()
+
+    /** 光影标定：高光阴影最小偏移（dp；默认与暗色阴影的最小白一致）。 */
+    var lightingLightMin: Float
+        get() = sp.getFloat("lightingLightMin", 3.5f)
+        set(v) = sp.edit().putFloat("lightingLightMin", v.coerceIn(0f, 40f)).apply()
 
     /** ExoPlayer 的音频会话 id（PlayerHost 创建播放器后写入，供各音效挂载）。 */
     @Volatile

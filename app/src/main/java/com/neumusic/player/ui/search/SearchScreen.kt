@@ -68,6 +68,7 @@ import com.neumusic.player.shade.LocalShadeColors
 import com.neumusic.player.shade.flatPressable
 import com.neumusic.player.shade.shadeInset
 import com.neumusic.player.shade.shadePressable
+import com.neumusic.player.ui.common.rememberPlayerBarSpace
 import com.neumusic.player.ui.common.TopEdgeFade
 import com.neumusic.player.ui.common.cardGridItems
 import com.neumusic.player.ui.common.gridColumns
@@ -99,6 +100,7 @@ fun SearchScreen(
     onOpenAlbum: (AlbumItem) -> Unit = {},
     onOpenSinger: (SearchSinger, androidx.compose.ui.geometry.Rect) -> Unit = { _, _ -> },
 ) {
+    val barSpace = rememberPlayerBarSpace()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val colors = LocalShadeColors.current
@@ -179,7 +181,7 @@ fun SearchScreen(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize().background(colors.background).doubleTapToTop(listState),
-            contentPadding = PaddingValues(bottom = 150.dp),
+            contentPadding = PaddingValues(bottom = barSpace),
         ) {
             item(key = "header") {
                 Column(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp)) {
@@ -305,6 +307,8 @@ fun SearchScreen(
                                 }
                             }
                         }
+                        // 分段控制器与下方结果之间留出呼吸（用户 2026-10-01：原来贴在一起）
+                        Spacer(Modifier.height(18.dp))
                     }
                 }
             }

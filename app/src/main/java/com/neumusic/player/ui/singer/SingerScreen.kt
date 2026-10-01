@@ -58,6 +58,7 @@ import com.neumusic.player.shade.flatPressable
 import com.neumusic.player.shade.shadeInset
 import com.neumusic.player.shade.shadePressable
 import com.neumusic.player.shade.shadeSurface
+import com.neumusic.player.ui.common.rememberPlayerBarSpace
 import com.neumusic.player.ui.common.SingerAvatarFrame
 import com.neumusic.player.ui.common.BlockRowSurface
 import com.neumusic.player.ui.common.CoverPlaceholder
@@ -99,6 +100,7 @@ fun SingerScreen(
     /** 头像画框的根坐标上报：歌手卡「飞位」转场以此为落点（AppRoot 用）。 */
     onAvatarBounds: (androidx.compose.ui.geometry.Rect) -> Unit = {},
 ) {
+    val barSpace = rememberPlayerBarSpace()
     val colors = LocalShadeColors.current
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -213,7 +215,7 @@ fun SingerScreen(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 150.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = barSpace),
         ) {
             item(key = "header") {
                 Column(

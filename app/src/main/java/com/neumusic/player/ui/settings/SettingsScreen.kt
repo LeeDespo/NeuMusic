@@ -65,8 +65,7 @@ import com.neumusic.player.data.api.ApiCache
 import com.neumusic.player.data.api.UserApi
 import com.neumusic.player.shade.LocalShadeColors
 import com.neumusic.player.shade.DayLightHost
-import com.neumusic.player.shade.LIGHT_RATIO_RANGE
-import com.neumusic.player.shade.MAX_OFFSET_RANGE
+import com.neumusic.player.shade.OFFSET_RANGE
 import com.neumusic.player.shade.flatPressable
 import com.neumusic.player.shade.formatHour
 import com.neumusic.player.shade.periodName
@@ -76,6 +75,7 @@ import com.neumusic.player.shade.shadeSurface
 import com.neumusic.player.ui.common.HorizontalShadeSlider
 import com.neumusic.player.ui.common.SegmentedControl
 import com.neumusic.player.ui.common.ShadeSwitchRow
+import com.neumusic.player.ui.common.rememberPlayerBarSpace
 import com.neumusic.player.ui.common.toastMain
 import com.neumusic.player.ui.home.DetailTopBar
 import kotlinx.coroutines.launch
@@ -93,6 +93,7 @@ fun SettingsScreen(onBack: () -> Unit) {
     var showWebLogin by remember { mutableStateOf(false) }
     // 分区（用户 2026-10-01 规格：设置项按区分组、用分段控制器切换）
     var tab by remember { mutableIntStateOf(0) }
+    val barSpace = rememberPlayerBarSpace()
     val scroll = rememberScrollState()
     LaunchedEffect(tab) { scroll.scrollTo(0) }   // 换区回到顶部
     var quality by remember { mutableStateOf(Prefs.quality) }
@@ -151,6 +152,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             SectionTitle("账号")
             Column(
                 Modifier.fillMaxWidth()
+                    .padding(horizontal = 16.dp)
                     .shadeSurface(cornerRadius = 24.dp, offset = 6.dp, blur = 10.dp)
                     .padding(18.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -197,6 +199,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             SectionTitle("播放音质")
             Column(
                 Modifier.fillMaxWidth()
+                    .padding(horizontal = 16.dp)
                     .shadeSurface(cornerRadius = 24.dp, offset = 6.dp, blur = 10.dp)
                     .padding(10.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -225,6 +228,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             SectionTitle("外观")
             Column(
                 Modifier.fillMaxWidth()
+                    .padding(horizontal = 16.dp)
                     .shadeSurface(cornerRadius = 24.dp, offset = 6.dp, blur = 10.dp)
                     .padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -335,6 +339,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             SectionTitle("光影")
             Column(
                 Modifier.fillMaxWidth()
+                    .padding(horizontal = 16.dp)
                     .shadeSurface(cornerRadius = 24.dp, offset = 6.dp, blur = 10.dp)
                     .padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -384,8 +389,9 @@ fun SettingsScreen(onBack: () -> Unit) {
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp),
                 )
                 Text(
-                    "色温 %+.2f · 暗影偏移 %+.2f× / %.2f× · 模糊 %.2f× / %.2f× · 强度 %.2f / %.2f".format(
-                        lx.warmth, lx.sx * lx.k, lx.sy * lx.k, lx.blurDark, lx.blurLight, lx.alphaDark, lx.alphaLight,
+                    "色温 %+.2f · 方向 (%+.2f, %+.2f) · 偏移 %.1f / %.1f dp · 模糊 %.2f× / %.2f× · 强度 %.2f / %.2f".format(
+                        lx.warmth, lx.ux, lx.uy, lx.lenDark, lx.lenLight,
+                        lx.blurDark, lx.blurLight, lx.alphaDark, lx.alphaLight,
                     ),
                     fontSize = 11.sp, color = colors.textTertiary, modifier = Modifier.padding(8.dp),
                 )
@@ -399,7 +405,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                         .padding(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("标定 · 色温三锚点 / 最大偏移", fontSize = 13.sp, color = colors.textSecondary)
+                    Text("标定 · 色温锚点 / 阴影偏移", fontSize = 13.sp, color = colors.textSecondary)
                     Spacer(Modifier.weight(1f))
                     Text(if (calibOpen) "收起" else "展开", fontSize = 12.sp, color = colors.accent)
                 }
@@ -408,13 +414,27 @@ fun SettingsScreen(onBack: () -> Unit) {
                     CalibSlider("白天最冷 5500K（正午）", DayLightHost.dayCold) { DayLightHost.dayCold = it }
                     CalibSlider("黑夜 8000K（月光）", DayLightHost.nightWarm) { DayLightHost.nightWarm = it }
                     CalibSlider(
-                        "最大偏移", DayLightHost.maxOffset, 0f..MAX_OFFSET_RANGE,
-                        text = "%.1f dp".format(DayLightHost.maxOffset),
-                    ) { DayLightHost.maxOffset = it }
+                        "暗色阴影最大偏移", DayLightHost.darkMax, 0f..OFFSET_RANGE,
+                        text = "%.1f dp".format(DayLightHost.darkMax),
+                    ) { DayLightHost.darkMax = it }
                     CalibSlider(
-                        "高光偏移倍数", DayLightHost.lightRatio, 0f..LIGHT_RATIO_RANGE,
-                        text = "%.2f×".format(DayLightHost.lightRatio),
-                    ) { DayLightHost.lightRatio = it }
+                        "暗色阴影最小偏移", DayLightHost.darkMin, 0f..OFFSET_RANGE,
+                        text = "%.1f dp".format(DayLightHost.darkMin),
+                    ) { DayLightHost.darkMin = it }
+                    CalibSlider(
+                        "高光阴影最大偏移", DayLightHost.lightMax, 0f..OFFSET_RANGE,
+                        text = "%.1f dp".format(DayLightHost.lightMax),
+                    ) { DayLightHost.lightMax = it }
+                    CalibSlider(
+                        "高光阴影最小偏移", DayLightHost.lightMin, 0f..OFFSET_RANGE,
+                        text = "%.1f dp".format(DayLightHost.lightMin),
+                    ) { DayLightHost.lightMin = it }
+                    Text(
+                        "两条阴影共用同一条变化曲线（正午/午夜最短、日出/日落最长），只是各自的取值区间不同；" +
+                            "组件自己的 offset 在此基础上等比缩放。",
+                        fontSize = 11.sp, color = colors.textTertiary,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
                         Text(
                             "恢复默认",
@@ -434,6 +454,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             SectionTitle("下载")
             Column(
                 Modifier.fillMaxWidth()
+                    .padding(horizontal = 16.dp)
                     .shadeSurface(cornerRadius = 24.dp, offset = 6.dp, blur = 10.dp)
                     .padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -476,6 +497,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             SectionTitle("播放栏与播放页")
             Column(
                 Modifier.fillMaxWidth()
+                    .padding(horizontal = 16.dp)
                     .shadeSurface(cornerRadius = 24.dp, offset = 6.dp, blur = 10.dp)
                     .padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -512,6 +534,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             SectionTitle("诊断日志")
             Column(
                 Modifier.fillMaxWidth()
+                    .padding(horizontal = 16.dp)
                     .shadeSurface(cornerRadius = 24.dp, offset = 6.dp, blur = 10.dp)
                     .padding(18.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -582,6 +605,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             SectionTitle("关于")
             Column(
                 Modifier.fillMaxWidth()
+                    .padding(horizontal = 16.dp)
                     .shadeSurface(cornerRadius = 24.dp, offset = 6.dp, blur = 10.dp)
                     .padding(18.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -596,7 +620,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                     fontSize = 11.sp, color = colors.textTertiary,
                 )
             }
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(24.dp + barSpace))   // 底部留白：播放栏实测高度
             }
         }
     }

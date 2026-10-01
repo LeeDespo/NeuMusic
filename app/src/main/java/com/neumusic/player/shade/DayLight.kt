@@ -25,9 +25,13 @@ import kotlin.math.roundToInt
  * 于是默认参数下「offset=6dp、blur=10dp 的组件」与实验里的观感一致。
  */
 class Lighting(
-    /** 暗影偏移倍数（正 = 右/下）。亮影取其相反值。 */
-    val sx: Float,
-    val sy: Float,
+    /** 暗色阴影的单位方向（正 = 右/下）；高光取其相反方向。 */
+    val ux: Float,
+    val uy: Float,
+    /** 暗色阴影的位移长度（dp，按基准 6dp 的组件计）。 */
+    val lenDark: Float,
+    /** 高光阴影的位移长度（dp，同基准）。**与暗色阴影共用同一条变化曲线**，只是取值区间不同。 */
+    val lenLight: Float,
     /** 两侧模糊倍率（乘组件自己的 blur）。 */
     val blurDark: Float,
     val blurLight: Float,
@@ -36,10 +40,6 @@ class Lighting(
     val alphaLight: Float,
     /** 色温 −1(冷)..+1(暖)。**只给两影着色，不动底色**（立体感依赖底色与两影的明度关系）。 */
     val warmth: Float,
-    /** 「最大偏移」倍率（相对基准 10dp）。 */
-    val k: Float,
-    /** 高光偏移相对暗影偏移的倍数（1 = 完全对称，与暗影等长反向）。 */
-    val lightK: Float,
 )
 
 // ───────────────────────── 偏移：日夜共用的一条连续扫描 ─────────────────────────
@@ -100,17 +100,26 @@ private const val NIGHT_ALPHA_LIGHT = 0.35f
 /** 偏移倍率的基准（组件的 offset 等于它时，默认参数下取到实验里的观感）。 */
 private const val REF_HOUR_DEFAULT = 12f
 
-/** 「最大偏移」滑杆的基准值与满量程（dp）。 */
-const val MAX_OFFSET_BASE = 10f
-const val MAX_OFFSET_RANGE = 40f
+/** 四条「阴影偏移」滑杆的量程（dp，按基准 6dp 的组件计）。 */
+const val OFFSET_RANGE = 40f
 
-/** 「高光偏移倍数」满量程（1 = 与暗影等长反向，即对称）。 */
-const val LIGHT_RATIO_RANGE = 2f
+/** 同一条曲线的两个端点处、方向向量的长度（由 [OFFSET_KEYS] 决定，算出来是常量）。 */
+private val OFFSET_MAG_NEUTRAL = 0.58f    // 正午/午夜：纯顶光
+private val OFFSET_MAG_EXTREME = 1.8918f  // 日出/日落：贴地平线
+
+/** 归一化基准：组件自己的 offset 等于它时，正好取到光照给出的长度。 */
+const val REF_OFFSET_DP = 6f
 
 /** 色温锚点默认值（与实验一致）。 */
 const val DEFAULT_DAY_WARM = 0.53f
 const val DEFAULT_DAY_COLD = -0.23f
 const val DEFAULT_NIGHT_WARM = -0.78f
+
+/** 两侧偏移的默认取值区间（dp，基准 6dp 组件）。高光的默认最小值与暗色阴影一致。 */
+const val DEFAULT_DARK_MIN = 3.5f
+const val DEFAULT_DARK_MAX = 10f
+const val DEFAULT_LIGHT_MIN = 3.5f
+const val DEFAULT_LIGHT_MAX = 5f
 
 /**
  * 色温 K → warmth：分段线性，锚点来自设置里的三个值。
@@ -187,27 +196,31 @@ private fun sampleDayAttr(h: Float): DayKey {
  */
 private fun sample(hour: Float, night: Boolean): Lighting {
     val h = hour.coerceIn(0f, 24f)
-    val (sx, sy) = sampleOffset(h)
-    val k = DayLightHost.maxOffset / MAX_OFFSET_BASE
-    val lightK = DayLightHost.lightRatio
-    return if (night) {
-        Lighting(
-            sx = sx, sy = sy,
-            blurDark = NIGHT_BLUR_DARK, blurLight = NIGHT_BLUR_LIGHT,
-            alphaDark = NIGHT_ALPHA_DARK, alphaLight = NIGHT_ALPHA_LIGHT,
-            warmth = warmthOfK(NIGHT_KELVIN, DayLightHost.dayWarm, DayLightHost.dayCold, DayLightHost.nightWarm),
-            k = k, lightK = lightK,
-        )
-    } else {
-        val d = sampleDayAttr(h)
-        Lighting(
-            sx = sx, sy = sy,
-            blurDark = d.blurDark, blurLight = d.blurLight,
-            alphaDark = d.alphaDark, alphaLight = d.alphaLight,
-            warmth = warmthOfK(d.kelvin, DayLightHost.dayWarm, DayLightHost.dayCold, DayLightHost.nightWarm),
-            k = k, lightK = lightK,
-        )
-    }
+    val (vx, vy) = sampleOffset(h)
+    // 同一条曲线 → 归一化相位：正午/午夜 = 0（最短）、日出/日落 = 1（最长）。
+    // 暗色阴影与高光阴影用**同一条曲线的相位**，只是各自的取值区间不同。
+    val mag = kotlin.math.sqrt(vx * vx + vy * vy)
+    val phase = ((mag - OFFSET_MAG_NEUTRAL) / (OFFSET_MAG_EXTREME - OFFSET_MAG_NEUTRAL))
+        .coerceIn(0f, 1f)
+    val inv = if (mag > 0.0001f) 1f / mag else 0f
+    val lenDark = DayLightHost.darkMin + (DayLightHost.darkMax - DayLightHost.darkMin) * phase
+    val lenLight = DayLightHost.lightMin + (DayLightHost.lightMax - DayLightHost.lightMin) * phase
+    // 夜晚用恒定属性；白天取 DAY_KEYS（区间外沿用端点）
+    val d = if (night) null else sampleDayAttr(h)
+    return Lighting(
+        ux = vx * inv,
+        uy = vy * inv,
+        lenDark = lenDark,
+        lenLight = lenLight,
+        blurDark = d?.blurDark ?: NIGHT_BLUR_DARK,
+        blurLight = d?.blurLight ?: NIGHT_BLUR_LIGHT,
+        alphaDark = d?.alphaDark ?: NIGHT_ALPHA_DARK,
+        alphaLight = d?.alphaLight ?: NIGHT_ALPHA_LIGHT,
+        warmth = warmthOfK(
+            d?.kelvin ?: NIGHT_KELVIN,
+            DayLightHost.dayWarm, DayLightHost.dayCold, DayLightHost.nightWarm,
+        ),
+    )
 }
 
 /**
@@ -264,19 +277,33 @@ object DayLightHost {
         get() = _nightWarm
         set(v) { _nightWarm = v; Prefs.lightingNightWarm = v }
 
-    private var _maxOffset by mutableFloatStateOf(MAX_OFFSET_BASE)
+    private var _darkMax by mutableFloatStateOf(DEFAULT_DARK_MAX)
 
-    /** 光影标定：最大偏移（dp，基准 10）。 */
-    var maxOffset: Float
-        get() = _maxOffset
-        set(v) { _maxOffset = v; Prefs.lightingMaxOffset = v }
+    /** 暗色阴影最大偏移（dp，基准 6dp 组件；日出/日落处取到它）。 */
+    var darkMax: Float
+        get() = _darkMax
+        set(v) { _darkMax = v; Prefs.lightingDarkMax = v }
 
-    private var _lightRatio by mutableFloatStateOf(1f)
+    private var _darkMin by mutableFloatStateOf(DEFAULT_DARK_MIN)
 
-    /** 光影标定：高光偏移相对暗影偏移的倍数（1 = 对称等长）。 */
-    var lightRatio: Float
-        get() = _lightRatio
-        set(v) { _lightRatio = v.coerceIn(0f, LIGHT_RATIO_RANGE); Prefs.lightingLightRatio = _lightRatio }
+    /** 暗色阴影最小偏移（dp；正午/午夜处取到它）。 */
+    var darkMin: Float
+        get() = _darkMin
+        set(v) { _darkMin = v; Prefs.lightingDarkMin = v }
+
+    private var _lightMax by mutableFloatStateOf(DEFAULT_LIGHT_MAX)
+
+    /** 高光阴影最大偏移（dp；与暗色阴影共用同一条曲线）。 */
+    var lightMax: Float
+        get() = _lightMax
+        set(v) { _lightMax = v; Prefs.lightingLightMax = v }
+
+    private var _lightMin by mutableFloatStateOf(DEFAULT_LIGHT_MIN)
+
+    /** 高光阴影最小偏移（dp；默认与暗色阴影的最小白一致）。 */
+    var lightMin: Float
+        get() = _lightMin
+        set(v) { _lightMin = v; Prefs.lightingLightMin = v }
 
     /** 由 MainActivity 在 Prefs.init 之后调用，把磁盘值灌进运行时状态。 */
     fun install() {
@@ -285,8 +312,10 @@ object DayLightHost {
         _dayWarm = Prefs.lightingDayWarm
         _dayCold = Prefs.lightingDayCold
         _nightWarm = Prefs.lightingNightWarm
-        _maxOffset = Prefs.lightingMaxOffset
-        _lightRatio = Prefs.lightingLightRatio
+        _darkMax = Prefs.lightingDarkMax
+        _darkMin = Prefs.lightingDarkMin
+        _lightMax = Prefs.lightingLightMax
+        _lightMin = Prefs.lightingLightMin
         setClockNow()
     }
 
@@ -294,8 +323,10 @@ object DayLightHost {
         dayWarm = DEFAULT_DAY_WARM
         dayCold = DEFAULT_DAY_COLD
         nightWarm = DEFAULT_NIGHT_WARM
-        maxOffset = MAX_OFFSET_BASE
-        lightRatio = 1f
+        darkMax = DEFAULT_DARK_MAX
+        darkMin = DEFAULT_DARK_MIN
+        lightMax = DEFAULT_LIGHT_MAX
+        lightMin = DEFAULT_LIGHT_MIN
     }
 
     /** 「随时间变化」用的时钟：每 30 秒对一次（时刻轴只有 0.5h 粒度，够用）。 */
