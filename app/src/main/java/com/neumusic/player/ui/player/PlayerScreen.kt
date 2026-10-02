@@ -8,6 +8,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -53,6 +54,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.neumusic.player.data.PlayMode
@@ -71,9 +73,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -141,6 +140,17 @@ fun PlayerScreen(onBack: () -> Unit, onOpenEqualizer: () -> Unit = {}) {
             delay(500)
         }
     }
+
+    // ── 黑胶转盘状态机（2026-10-03 移植自 ~/Documents/VinylLab）──
+    // 只跟随播放、不驱动播放：PlayerHost 照旧负责换歌，转盘把「抬针→回臂→减速→换片」
+    // 演出来（详见 VinylTurntable.kt 的说明）。三个信号都在这里喂。
+    val turntable = remember { VinylTurntableState(scope) }
+    LaunchedEffect(Unit) { turntable.start() }
+    LaunchedEffect(playing) { turntable.setPlaying(playing) }
+    LaunchedEffect(track?.mid) { turntable.onTrackChanged(track?.coverUrl.orEmpty()) }
+    // 自动换片的提前量：真实播放器不通知「还剩几秒」，用「位置 + 时长」自己算。
+    // 500ms 轮询 → 触发最多晚 0.5s（规格 §5.5 接受这个抖动）。
+    LaunchedEffect(pos, dur, playing) { turntable.onPosition(pos, dur) }
 
     // 切歌后的红心状态：直接读全局缓存（LikedList 已翻页取全），
     // 不再每首歌都发一次请求。缓存未就绪时顺带拉一次。
@@ -236,6 +246,7 @@ fun PlayerScreen(onBack: () -> Unit, onOpenEqualizer: () -> Unit = {}) {
                     singer = track?.singer.orEmpty(),
                     coverUrl = track?.coverUrl.orEmpty(),
                     playing = playing,
+                    turntable = turntable,
                 )
             }
             // 歌词面板：0→1 从底部升起并长到三行迷你（带翻译/注音位）；1→2 长到全屏
@@ -468,8 +479,8 @@ private fun FlatRoundIcon(icon: androidx.compose.ui.graphics.vector.ImageVector,
 }
 
 /**
- * 封面页：凸起圆盘（外圈频谱环）+ 曲名/歌手。
- * 进度条已移到公共控制区上方（直线形式，用户要求）。
+ * 封面页：黑胶模式 = [VinylTurntable]（唱片 + 唱臂）；普通模式 = 凸起圆盘 + 外圈频谱环。
+ * 曲名/歌手在两旁。
  */
 @Composable
 private fun CoverPage(
@@ -477,21 +488,36 @@ private fun CoverPage(
     singer: String,
     coverUrl: String,
     playing: Boolean,
+    turntable: VinylTurntableState,
 ) {
     val colors = LocalShadeColors.current
+    val vinyl by Prefs.vinylModeFlow.collectAsState()
     Column(
         Modifier.fillMaxSize().padding(horizontal = 28.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.weight(1f))
-        CoverDisc(
-            coverUrl = coverUrl,
-            frac = 0f,
-            playing = playing,
-            onDragStart = {},
-            onDrag = {},
-            onDragEnd = {},
-        )
+        if (vinyl) {
+            // 黑胶模式：舞台宽 1.225 D（盘心偏左、右侧留给唱臂扫掠），按可用宽度缩放。
+            BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                val discD = minOf(
+                    maxWidth / VinylGeo.STAGE_W,
+                    VinylGeo.DISC_D.dp,
+                )
+                VinylTurntable(state = turntable, discD = discD) { url, alpha, dxFrac ->
+                    CoverImage(url = url, alpha = alpha, dxFrac = dxFrac, discD = discD)
+                }
+            }
+        } else {
+            CoverDisc(
+                coverUrl = coverUrl,
+                frac = 0f,
+                playing = playing,
+                onDragStart = {},
+                onDrag = {},
+                onDragEnd = {},
+            )
+        }
         Spacer(Modifier.height(28.dp))
         Text(
             trackName ?: "未在播放",
@@ -506,6 +532,39 @@ private fun CoverPage(
             textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.weight(1f))
+    }
+}
+
+/**
+ * 片心封面（黑胶模式的标签）：真实封面图 / 首字母占位，换片时做滑动 + 淡入淡出。
+ * 尺寸固定为 `discD × VinylGeo.COVER_RATIO`（= 0.42 D，与实验室同一比例）。
+ */
+@Composable
+private fun CoverImage(url: String, alpha: Float, dxFrac: Float, discD: Dp) {
+    val colors = LocalShadeColors.current
+    val size = discD * VinylGeo.COVER_RATIO
+    val slidePx = with(LocalDensity.current) { (discD.toPx() * dxFrac) }
+    Box(
+        Modifier
+            .size(size)
+            .graphicsLayer {
+                this.alpha = alpha
+                translationX = slidePx
+            }
+            .clip(CircleShape)
+            .background(colors.background),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (url.isEmpty()) {
+            CoverPlaceholder()
+        } else {
+            AsyncImage(
+                model = url,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
     }
 }
 
@@ -536,29 +595,15 @@ private fun CoverDisc(
     val colors = LocalShadeColors.current
     val animatedFrac by animateFloatAsState(frac, tween(160), label = "ringFrac")
     val ringMaxLen = RING_MAX_LEN
-    val vinyl by Prefs.vinylModeFlow.collectAsState()
     // 电平流在此订阅（而不是页面顶层）：高频重组被隔离在圆盘子树内
     val usingFft by VizHost.usingFft.collectAsState()
     val fftLevels by VizHost.levels.collectAsState()
     val pcmLevels by PlayerHost.vizProcessor.levels.collectAsState()
     val levels = if (usingFft) fftLevels else pcmLevels
 
-    // 自转：**只有黑胶模式开启且在播放时**才转（用户规格：关闭黑胶就是不转的普通圆盘）。
-    // 暂停时停在当前角度。
-    val rotation = remember { Animatable(0f) }
-    LaunchedEffect(playing, vinyl) {
-        if (playing && vinyl) {
-            rotation.animateTo(
-                targetValue = rotation.value + 360f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(24000, easing = LinearEasing),
-                    repeatMode = RepeatMode.Restart,
-                ),
-            )
-        } else {
-            rotation.stop()
-        }
-    }
+    // 自转已随黑胶模式一并搬到 VinylTurntable（2026-10-03 移植）：
+    // CoverDisc 现在只画**非黑胶**的普通圆盘 —— 用户规格「关闭黑胶就是不转的普通圆盘」，
+    // 所以这里不再需要 rotation/自转动画（原来的 `Animatable` 循环已删除）。
 
     Box(
         Modifier.size(DISC_SIZE + (RING_GAP + RING_WIDTH) * 2),
@@ -597,47 +642,19 @@ private fun CoverDisc(
         }
 
         // 凸起底盘：**保持静止**——阴影不能跟着唱片转（用户规格），旋转只发生在盘面内容上。
+        // 黑胶模式已改由 CoverPage → VinylTurntable 承担（转盘自带底盘/沟槽/唱臂），
+        // 这里只负责**非黑胶**的普通圆盘（频谱环也只在普通模式画，见规格 §5.8）。
         Box(
             Modifier
                 .size(DISC_SIZE)
                 .shadeSurface(cornerRadius = DISC_SIZE / 2, offset = 6.dp, blur = 12.dp),
             contentAlignment = Alignment.Center,
         ) {
-            // 黑胶模式（设置「黑胶唱片模式」）：画框变宽，其上一圈圈细凹环当唱片纹路
-            // （上缘吃进暗影、下缘吃进亮影 = 凹陷；环旋转对称，无需跟随自转）。
-            val vinyl by Prefs.vinylModeFlow.collectAsState()
-            if (vinyl) {
-                Canvas(Modifier.size(DISC_SIZE)) {
-                    val rMin = ((DISC_SIZE - 76.dp).toPx()) / 2f + 5.dp.toPx()
-                    val rMax = ((DISC_SIZE - 16.dp).toPx()) / 2f - 6.dp.toPx()
-                    val rings = 7
-                    val stroke = 0.8.dp.toPx()
-                    for (i in 0 until rings) {
-                        val f = i.toFloat() / (rings - 1)
-                        val r = rMin + (rMax - rMin) * f
-                        drawArc(
-                            color = colors.shadowDark.copy(alpha = 0.34f),
-                            startAngle = 180f, sweepAngle = 180f, useCenter = false,
-                            topLeft = Offset(size.width / 2f - r, size.height / 2f - r),
-                            size = Size(2f * r, 2f * r),
-                            style = Stroke(width = stroke, cap = StrokeCap.Round),
-                        )
-                        drawArc(
-                            color = colors.shadowLight.copy(alpha = 0.4f),
-                            startAngle = 0f, sweepAngle = 180f, useCenter = false,
-                            topLeft = Offset(size.width / 2f - r, size.height / 2f - r),
-                            size = Size(2f * r, 2f * r),
-                            style = Stroke(width = stroke, cap = StrokeCap.Round),
-                        )
-                    }
-                }
-            }
-            // 盘面内容（封面）：随播放缓慢自转；黑胶模式封面更小、画框更宽
-            val coverDiameter = if (vinyl) DISC_SIZE - 76.dp else DISC_SIZE - 16.dp
+            // 盘面内容（封面）：普通模式不转（黑胶模式的自转在转盘组件里）
+            val coverDiameter = DISC_SIZE - 16.dp
             Box(
                 Modifier
-                    .size(coverDiameter)
-                    .graphicsLayer { rotationZ = rotation.value },
+                    .size(coverDiameter),
                 contentAlignment = Alignment.Center,
             ) {
                 if (coverUrl.isEmpty()) {
