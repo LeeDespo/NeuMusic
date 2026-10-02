@@ -158,9 +158,11 @@ fun SettingsScreen(onBack: () -> Unit) {
 
             AnimatedVisibility(
                 visible = tab == 0,
-                // 切换分区：上升淡入 / 下降淡出，时长短（用户要求"整体过渡时间要短"）
-                enter = fadeIn(tween(160)) + slideInVertically(tween(160)) { it / 10 },
-                exit = fadeOut(tween(120)) + slideOutVertically(tween(120)) { it / 10 },
+                // 切换分区：与搜索页/歌手页分段切换同款 —— **纯淡入淡出**，时长短。
+                // （早前带 slideInVertically(it/10)：分区分高，位移 = 分区高度的 1/10，
+                //  长的分区一下子滑动几百像素，看着很怪。）
+                enter = fadeIn(tween(170)),
+                exit = fadeOut(tween(120)),
             ) {
             // ── 账号 ──
             SectionTitle("账号")
@@ -210,9 +212,11 @@ fun SettingsScreen(onBack: () -> Unit) {
 
             AnimatedVisibility(
                 visible = tab == 3,
-                // 切换分区：上升淡入 / 下降淡出，时长短（用户要求"整体过渡时间要短"）
-                enter = fadeIn(tween(160)) + slideInVertically(tween(160)) { it / 10 },
-                exit = fadeOut(tween(120)) + slideOutVertically(tween(120)) { it / 10 },
+                // 切换分区：与搜索页/歌手页分段切换同款 —— **纯淡入淡出**，时长短。
+                // （早前带 slideInVertically(it/10)：分区分高，位移 = 分区高度的 1/10，
+                //  长的分区一下子滑动几百像素，看着很怪。）
+                enter = fadeIn(tween(170)),
+                exit = fadeOut(tween(120)),
             ) {
             // ── 音质 ──
             SectionTitle("播放音质")
@@ -244,9 +248,11 @@ fun SettingsScreen(onBack: () -> Unit) {
 
             AnimatedVisibility(
                 visible = tab == 1,
-                // 切换分区：上升淡入 / 下降淡出，时长短（用户要求"整体过渡时间要短"）
-                enter = fadeIn(tween(160)) + slideInVertically(tween(160)) { it / 10 },
-                exit = fadeOut(tween(120)) + slideOutVertically(tween(120)) { it / 10 },
+                // 切换分区：与搜索页/歌手页分段切换同款 —— **纯淡入淡出**，时长短。
+                // （早前带 slideInVertically(it/10)：分区分高，位移 = 分区高度的 1/10，
+                //  长的分区一下子滑动几百像素，看着很怪。）
+                enter = fadeIn(tween(170)),
+                exit = fadeOut(tween(120)),
             ) {
             // ── 外观 ──
             SectionTitle("外观")
@@ -360,9 +366,11 @@ fun SettingsScreen(onBack: () -> Unit) {
 
             AnimatedVisibility(
                 visible = tab == 2,
-                // 切换分区：上升淡入 / 下降淡出，时长短（用户要求"整体过渡时间要短"）
-                enter = fadeIn(tween(160)) + slideInVertically(tween(160)) { it / 10 },
-                exit = fadeOut(tween(120)) + slideOutVertically(tween(120)) { it / 10 },
+                // 切换分区：与搜索页/歌手页分段切换同款 —— **纯淡入淡出**，时长短。
+                // （早前带 slideInVertically(it/10)：分区分高，位移 = 分区高度的 1/10，
+                //  长的分区一下子滑动几百像素，看着很怪。）
+                enter = fadeIn(tween(170)),
+                exit = fadeOut(tween(120)),
             ) {
             // ── 光影（随时间变化的新拟物光照；模型与曲线见 shade/DayLight.kt）──
             SectionTitle("光影")
@@ -480,9 +488,11 @@ fun SettingsScreen(onBack: () -> Unit) {
 
             AnimatedVisibility(
                 visible = tab == 4,
-                // 切换分区：上升淡入 / 下降淡出，时长短（用户要求"整体过渡时间要短"）
-                enter = fadeIn(tween(160)) + slideInVertically(tween(160)) { it / 10 },
-                exit = fadeOut(tween(120)) + slideOutVertically(tween(120)) { it / 10 },
+                // 切换分区：与搜索页/歌手页分段切换同款 —— **纯淡入淡出**，时长短。
+                // （早前带 slideInVertically(it/10)：分区分高，位移 = 分区高度的 1/10，
+                //  长的分区一下子滑动几百像素，看着很怪。）
+                enter = fadeIn(tween(170)),
+                exit = fadeOut(tween(120)),
             ) {
             // ── 下载 ──
             SectionTitle("下载")
@@ -528,9 +538,11 @@ fun SettingsScreen(onBack: () -> Unit) {
 
             AnimatedVisibility(
                 visible = tab == 3,
-                // 切换分区：上升淡入 / 下降淡出，时长短（用户要求"整体过渡时间要短"）
-                enter = fadeIn(tween(160)) + slideInVertically(tween(160)) { it / 10 },
-                exit = fadeOut(tween(120)) + slideOutVertically(tween(120)) { it / 10 },
+                // 切换分区：与搜索页/歌手页分段切换同款 —— **纯淡入淡出**，时长短。
+                // （早前带 slideInVertically(it/10)：分区分高，位移 = 分区高度的 1/10，
+                //  长的分区一下子滑动几百像素，看着很怪。）
+                enter = fadeIn(tween(170)),
+                exit = fadeOut(tween(120)),
             ) {
             // ── 播放栏与播放页（原本混在「下载」区里，2026-10-01 分区整理独立出来）──
             SectionTitle("播放栏与播放页")
@@ -570,9 +582,11 @@ fun SettingsScreen(onBack: () -> Unit) {
 
             AnimatedVisibility(
                 visible = tab == 5,
-                // 切换分区：上升淡入 / 下降淡出，时长短（用户要求"整体过渡时间要短"）
-                enter = fadeIn(tween(160)) + slideInVertically(tween(160)) { it / 10 },
-                exit = fadeOut(tween(120)) + slideOutVertically(tween(120)) { it / 10 },
+                // 切换分区：与搜索页/歌手页分段切换同款 —— **纯淡入淡出**，时长短。
+                // （早前带 slideInVertically(it/10)：分区分高，位移 = 分区高度的 1/10，
+                //  长的分区一下子滑动几百像素，看着很怪。）
+                enter = fadeIn(tween(170)),
+                exit = fadeOut(tween(120)),
             ) {
             // ── 诊断日志（2026-09-30 规格）：结构化、可开关、可清空、可限容、可导出 ──
             SectionTitle("诊断日志")

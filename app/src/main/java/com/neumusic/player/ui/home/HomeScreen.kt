@@ -44,6 +44,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
@@ -394,7 +398,11 @@ private fun StationCard(title: String, picUrl: String, onClick: (Rect) -> Unit) 
     var bounds by remember { mutableStateOf(Rect.Zero) }
     Column(
         Modifier.width(104.dp)
-            .onGloballyPositioned { bounds = it.boundsInRoot() }
+            .onGloballyPositioned { c ->
+                // 手工构造「未裁剪」的边界：该版本的 boundsInRoot() 会按父级裁剪，
+                // 卡片在屏幕边缘只露一半时会把宽高裁小 → 飞位克隆卡缩成小框（用户实测）。
+                bounds = androidx.compose.ui.geometry.Rect(c.localToRoot(androidx.compose.ui.geometry.Offset.Zero), androidx.compose.ui.geometry.Size(c.size.width.toFloat(), c.size.height.toFloat()))
+            }
             .shadePressable(cornerRadius = 18.dp, offset = 5.dp, blur = 8.dp) { onClick(bounds) }
             .padding(6.dp),
     ) {
@@ -484,7 +492,11 @@ private fun LikedCard(count: Int?, onClick: (Rect) -> Unit) {
     var bounds by remember { mutableStateOf(Rect.Zero) }
     Column(
         Modifier.width(104.dp)
-            .onGloballyPositioned { bounds = it.boundsInRoot() }
+            .onGloballyPositioned { c ->
+                // 手工构造「未裁剪」的边界：该版本的 boundsInRoot() 会按父级裁剪，
+                // 卡片在屏幕边缘只露一半时会把宽高裁小 → 飞位克隆卡缩成小框（用户实测）。
+                bounds = androidx.compose.ui.geometry.Rect(c.localToRoot(androidx.compose.ui.geometry.Offset.Zero), androidx.compose.ui.geometry.Size(c.size.width.toFloat(), c.size.height.toFloat()))
+            }
             .shadePressable(cornerRadius = 18.dp, offset = 5.dp, blur = 8.dp) { onClick(bounds) }
             .padding(6.dp),
     ) {
@@ -516,7 +528,11 @@ private fun PlaylistCard(item: PlaylistItem, onClick: (Rect) -> Unit) {
     var bounds by remember { mutableStateOf(Rect.Zero) }
     Column(
         Modifier.width(104.dp)
-            .onGloballyPositioned { bounds = it.boundsInRoot() }
+            .onGloballyPositioned { c ->
+                // 手工构造「未裁剪」的边界：该版本的 boundsInRoot() 会按父级裁剪，
+                // 卡片在屏幕边缘只露一半时会把宽高裁小 → 飞位克隆卡缩成小框（用户实测）。
+                bounds = androidx.compose.ui.geometry.Rect(c.localToRoot(androidx.compose.ui.geometry.Offset.Zero), androidx.compose.ui.geometry.Size(c.size.width.toFloat(), c.size.height.toFloat()))
+            }
             .shadePressable(cornerRadius = 18.dp, offset = 5.dp, blur = 8.dp) { onClick(bounds) }
             .padding(6.dp),
     ) {
@@ -551,7 +567,11 @@ private fun AlbumCard(item: AlbumItem, onClick: (Rect) -> Unit) {
     var bounds by remember { mutableStateOf(Rect.Zero) }
     Column(
         Modifier.width(104.dp)
-            .onGloballyPositioned { bounds = it.boundsInRoot() }
+            .onGloballyPositioned { c ->
+                // 手工构造「未裁剪」的边界：该版本的 boundsInRoot() 会按父级裁剪，
+                // 卡片在屏幕边缘只露一半时会把宽高裁小 → 飞位克隆卡缩成小框（用户实测）。
+                bounds = androidx.compose.ui.geometry.Rect(c.localToRoot(androidx.compose.ui.geometry.Offset.Zero), androidx.compose.ui.geometry.Size(c.size.width.toFloat(), c.size.height.toFloat()))
+            }
             .shadePressable(cornerRadius = 18.dp, offset = 5.dp, blur = 8.dp) { onClick(bounds) }
             .padding(6.dp),
     ) {
@@ -655,11 +675,20 @@ private fun RecommendCard(
                 Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                // 与封面同高：字数多少都不改变大小；超出在槽内滚动
+                // 与封面同高：字数多少都不改变大小；超出在槽内滚动。
+                // **槽内滑到头后不再把滚动传给主页**：否则在详情里上下划会把整页带着滚
+                // （用户实测"不方便"）。这里的 nestedScroll 把子级用不完的滑动量吃掉。
                 Box(
                     Modifier
                         .fillMaxWidth()
                         .height(cover)
+                        .nestedScroll(object : NestedScrollConnection {
+                            override fun onPostScroll(
+                                consumed: Offset,
+                                available: Offset,
+                                source: NestedScrollSource,
+                            ): Offset = available   // 全部吃掉 → 父级（主页列表）不动
+                        })
                         .shadeInset(cornerRadius = 14.dp, offset = 3.dp, blur = 5.dp)
                         .padding(horizontal = 10.dp),
                 ) {
@@ -724,7 +753,11 @@ private fun SmallSingerCard(s: FollowSinger, onClick: (Rect) -> Unit) {
     Column(
         Modifier
             .width(156.dp)
-            .onGloballyPositioned { bounds = it.boundsInRoot() }
+            .onGloballyPositioned { c ->
+                // 手工构造「未裁剪」的边界：该版本的 boundsInRoot() 会按父级裁剪，
+                // 卡片在屏幕边缘只露一半时会把宽高裁小 → 飞位克隆卡缩成小框（用户实测）。
+                bounds = androidx.compose.ui.geometry.Rect(c.localToRoot(androidx.compose.ui.geometry.Offset.Zero), androidx.compose.ui.geometry.Size(c.size.width.toFloat(), c.size.height.toFloat()))
+            }
             .cardTap { onClick(bounds) },
     ) {
         // 画框规格按比例与歌手页头像一致（SingerAvatarFrame：216dp 基准等比换算），

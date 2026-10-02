@@ -597,9 +597,16 @@ private fun androidx.compose.foundation.lazy.LazyListScope.searchResultItems(
         SearchTab.SONGS -> {
             val list = songs.orEmpty()
             if (list.isEmpty()) {
-                item { EmptyText("没有找到相关歌曲") }
-            } else item {
-                Column(Modifier.padding(horizontal = 16.dp)) {
+                item(key = "songsEmpty") { EmptyText("没有找到相关歌曲") }
+            } else item(key = "songs") {
+                Column(
+                    Modifier
+                        .animateItem(   // 切标签时整块淡出/淡入（与卡片行同款）
+                            fadeInSpec = androidx.compose.animation.core.tween(170),
+                            fadeOutSpec = androidx.compose.animation.core.tween(120),
+                        )
+                        .padding(horizontal = 16.dp),
+                ) {
                     TrackListBlock {
                         list.forEachIndexed { i, track ->
                             if (i > 0) RowDivider()
@@ -623,7 +630,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.searchResultItems(
         // 「飞位」共享元素转场（卡片飞到歌手页头像位，其余元素淡出/浮现）需要起点。
         SearchTab.SINGERS -> {
             val list = singers.orEmpty()
-            if (list.isEmpty()) item { EmptyText("没有找到相关歌手") }
+            if (list.isEmpty()) item(key = "singersEmpty") { EmptyText("没有找到相关歌手") }
             else cardGridItems(
                 items = list,
                 columns = gridColumns(screenWidth, minCard = 300.dp),
@@ -634,7 +641,10 @@ private fun androidx.compose.foundation.lazy.LazyListScope.searchResultItems(
                 var cardBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
                 Box(
                     Modifier
-                        .onGloballyPositioned { cardBounds = it.boundsInRoot() }
+                        .onGloballyPositioned { c ->
+                            // 同上：边缘卡片不能被裁剪（否则飞位克隆卡缩成小框）
+                            cardBounds = androidx.compose.ui.geometry.Rect(c.localToRoot(androidx.compose.ui.geometry.Offset.Zero), androidx.compose.ui.geometry.Size(c.size.width.toFloat(), c.size.height.toFloat()))
+                        }
                         .fillMaxWidth(),
                 ) {
                     SingerCard(
@@ -647,7 +657,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.searchResultItems(
         // 专辑/歌单：歌手页同款的封面卡网格
         SearchTab.ALBUMS -> {
             val list = albums.orEmpty()
-            if (list.isEmpty()) item { EmptyText("没有找到相关专辑") }
+            if (list.isEmpty()) item(key = "albumsEmpty") { EmptyText("没有找到相关专辑") }
             else cardGridItems(
                 items = list,
                 columns = gridColumns(screenWidth, minCard = 170.dp),
@@ -663,7 +673,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.searchResultItems(
         }
         SearchTab.PLAYLISTS -> {
             val list = playlists.orEmpty()
-            if (list.isEmpty()) item { EmptyText("没有找到相关歌单") }
+            if (list.isEmpty()) item(key = "playlistsEmpty") { EmptyText("没有找到相关歌单") }
             else cardGridItems(
                 items = list,
                 columns = gridColumns(screenWidth, minCard = 170.dp),

@@ -301,7 +301,14 @@ fun SingerScreen(
                         i == songs.lastIndex -> BlockSlice.Tail
                         else -> BlockSlice.Middle
                     }
-                    BlockRowSurface(position = position) {
+                    BlockRowSurface(
+                        position = position,
+                        // 切「歌曲|专辑」/「最新|热门」时整行淡入淡出（与搜索页卡片行同款）
+                        modifier = Modifier.animateItem(
+                            fadeInSpec = androidx.compose.animation.core.tween(170),
+                            fadeOutSpec = androidx.compose.animation.core.tween(120),
+                        ),
+                    ) {
                         Column {
                             if (i > 0) RowDivider()
                             TrackRow(
