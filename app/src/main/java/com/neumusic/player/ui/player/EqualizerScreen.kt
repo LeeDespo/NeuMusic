@@ -106,7 +106,8 @@ fun EqualizerScreen(onBack: () -> Unit) {
         Modifier
             .fillMaxSize()
             .background(colors.background)
-            .statusBarsPadding()
+            // 不在这里加 statusBarsPadding：那会把整页（含顶部渐隐线）往下推一整个状态栏，
+            // 渐隐线就比别的页低。状态栏内缩由顶栏（DetailTopBar）自己负责。
             .navigationBarsPadding(),
     ) {
         // 顶栏随页面滚动（用户规定）：放进滚动列第一项

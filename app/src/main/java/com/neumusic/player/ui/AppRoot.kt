@@ -728,7 +728,9 @@ private fun SecondPageOverlay(
         Modifier
             .fillMaxSize()
             .zIndex(3f)
-            .statusBarsPadding()
+            // **不能在这里加 statusBarsPadding**：二级页面整层（含顶部渐隐线）会被下推
+            // 一整个状态栏，于是"只有主页的渐隐线是对的、其它页都低一截"（用户反复反馈的
+            // 就是这个）。状态栏内缩由各页自己负责（rememberTopContentInset / 顶栏自带）。
             .graphicsLayer {
                 val a = page.value.coerceIn(0f, 1f)
                 alpha = a

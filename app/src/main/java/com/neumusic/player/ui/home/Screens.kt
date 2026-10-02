@@ -99,11 +99,12 @@ fun DetailTopBar(
     withStatusBarInset: Boolean = true,
 ) {
     val colors = LocalShadeColors.current
+    // 顶部内缩：状态栏 + 渐隐线偏移(8dp) + 12dp —— 与主页/列表页首个内容同高
+    val topPad = if (withStatusBarInset) rememberTopContentInset(extra = 12.dp) else 12.dp
     Row(
         Modifier
             .fillMaxWidth()
-            .then(if (withStatusBarInset) Modifier.statusBarsPadding() else Modifier)
-            .padding(horizontal = horizontalPadding, vertical = 12.dp),
+            .padding(start = horizontalPadding, end = horizontalPadding, top = topPad, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
@@ -572,13 +573,15 @@ private fun ListFooter(
 @Composable
 private fun ListTopBarRow(title: String, onBack: () -> Unit, trailing: (@Composable RowScope.() -> Unit)? = null) {
     val colors = LocalShadeColors.current
+    // 状态栏 + 渐隐线偏移(8dp) + 12dp：与主页首个内容（topInset + 12dp）同高
+    val topContentTop = rememberTopContentInset(extra = 12.dp)
     Row(
-        // 顶栏自己带状态栏内缩、上下各 12dp —— 与 DetailTopBar 完全一致，
-        // 于是各页的返回键落在同一高度（用户按返回键位置比过）。
+        // 顶栏自己带内缩：状态栏 + TOP_FADE_BELOW_STATUS_BAR(8dp) + 12dp，
+        // 与主页的 contentPadding(topInset + 12dp) 完全同高 —— 首页与列表页的
+        // 「首个内容位置 / 渐隐界线视觉高度」才对得上（用户按页面比过）。
         Modifier
             .fillMaxWidth()
-            .statusBarsPadding()
-            .padding(top = 12.dp, bottom = 12.dp),
+            .padding(top = topContentTop, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {

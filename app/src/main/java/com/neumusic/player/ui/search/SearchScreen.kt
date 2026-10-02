@@ -72,6 +72,7 @@ import com.neumusic.player.shade.shadeInset
 import com.neumusic.player.shade.shadePressable
 import com.neumusic.player.ui.common.rememberPlayerBarSpace
 import com.neumusic.player.ui.common.TopEdgeFade
+import com.neumusic.player.ui.common.rememberTopContentInset
 import com.neumusic.player.ui.common.cardGridItems
 import com.neumusic.player.ui.common.gridColumns
 import com.neumusic.player.ui.common.MediaCard
@@ -227,8 +228,10 @@ fun SearchScreen(
         ) {
             item(key = "header") {
                 Column(
-                    Modifier.fillMaxWidth().statusBarsPadding()
-                        .padding(horizontal = 16.dp).padding(top = 12.dp),
+                    // 与主页/列表页同高：状态栏 + 渐隐线偏移(8dp) + 12dp
+                    Modifier.fillMaxWidth()
+                        .padding(top = rememberTopContentInset(extra = 12.dp))
+                        .padding(horizontal = 16.dp),
                 ) {
                     // 顶栏行：返回 + 标题 + 下载（选择模式中变 ✕）
                     Row(

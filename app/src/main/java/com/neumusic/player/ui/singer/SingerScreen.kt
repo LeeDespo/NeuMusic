@@ -60,6 +60,7 @@ import com.neumusic.player.shade.shadePressable
 import com.neumusic.player.shade.shadeSurface
 import com.neumusic.player.ui.common.rememberPlayerBarSpace
 import com.neumusic.player.ui.common.SingerAvatarFrame
+import com.neumusic.player.ui.common.rememberTopContentInset
 import com.neumusic.player.ui.common.BlockRowSurface
 import com.neumusic.player.ui.common.CoverPlaceholder
 import com.neumusic.player.ui.common.MediaCard
@@ -215,11 +216,12 @@ fun SingerScreen(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = barSpace),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 0.dp, bottom = barSpace),
         ) {
             item(key = "header") {
                 Column(
-                    Modifier.fillMaxWidth().statusBarsPadding(),
+                    // 与主页/列表页同高：状态栏 + 渐隐线偏移(8dp) + 12dp
+                    Modifier.fillMaxWidth().padding(top = rememberTopContentInset(extra = 12.dp)),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     // 返回钮靠左（随内容滚走，与列表页一致）
