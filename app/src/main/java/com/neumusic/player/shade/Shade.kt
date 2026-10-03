@@ -65,6 +65,55 @@ data class ShadeColors(
     val accent: Color,
     val isDark: Boolean,
 ) {
+    // ── M3 角色位（v2 唱臂三件套 / LED 胶囊的色板，m3Roles 表）──
+    // 全部由 background / accent **推导**（浅色往黑压、深色往白提），于是：
+    //  - 跟随深浅色主题（两套都校过）；
+    //  - 莫奈取色只换 accent → 这些角色跟着走，底色与两影不动（新拟物的明度关系不被破坏）。
+    // 数值与实验室 ~/Documents/VinylLab 的 VinylSurface.kt 同一套（复审逐像素核过的那组）：
+    //   surfaceContainerHighest (215,218,221) / secondaryContainer (114,110,156) /
+    //   secondary (63,53,134) / headPanel (81,69,173) / headHi (125,116,194) / ledOff (189,192,194)。
+
+    private val neutral: Color get() = if (isDark) Color.White else Color.Black
+
+    /** 派生用：a→b 按 t 混合（clamp 0..1）。 */
+    private fun mix(a: Color, b: Color, t: Float): Color = Color(
+        (a.red + (b.red - a.red) * t).coerceIn(0f, 1f),
+        (a.green + (b.green - a.green) * t).coerceIn(0f, 1f),
+        (a.blue + (b.blue - a.blue) * t).coerceIn(0f, 1f),
+        a.alpha,
+    )
+
+    /** m3Roles[0]＝唱臂底座（同心圆）：中性容器，比底色暗/亮一档。 */
+    val surfaceContainerHighest: Color get() = mix(background, neutral, if (isDark) 0.08f else 0.09f)
+
+    /** m3Roles[4] 系＝LED 胶囊「灭」：比凹槽底再暗一档（复审：21 级看不见，现 44 级）。 */
+    val surfaceVariant: Color get() = mix(background, neutral, if (isDark) 0.13f else 0.14f)
+
+    /** m3Roles[1]＝唱臂胶囊：弱化的强调色容器。 */
+    val secondaryContainer: Color
+        get() = mix(mix(accent, background, 0.50f), neutral, if (isDark) 0.30f else 0.34f)
+
+    /** m3Roles[2]＝唱头倒角矩形：强调色压暗/压亮，读得出「另一个部件」。 */
+    val secondary: Color get() = mix(accent, neutral, if (isDark) 0.18f else 0.42f)
+
+    /** 唱头内嵌面板（secondary 亮一档）。 */
+    val headPanel: Color get() = mix(secondary, accent, 0.40f)
+
+    /** 唱头受光侧高光（面板再亮一档，随光照强度走）。 */
+    val headHi: Color get() = mix(headPanel, Color.White, if (isDark) 0.18f else 0.34f)
+
+    /** 针尖标记点（primary 系；与唱头本体同色就读不出是第二块料）。 */
+    val spindleDot: Color get() = mix(accent, Color.White, if (isDark) 0.05f else 0.25f)
+
+    /** m3Roles[3]＝LED 胶囊「亮」。 */
+    val ledOn: Color get() = accent
+
+    /** LED 胶囊点亮条的顶端高光（亮一档，读出"灯芯"）。 */
+    val ledOnHot: Color get() = mix(accent, Color.White, if (isDark) 0.30f else 0.42f)
+
+    /** LED 胶囊「灭」（surfaceVariant 再压一档）。 */
+    val ledOff: Color get() = mix(background, neutral, if (isDark) 0.14f else 0.20f)
+
     companion object {
         val Light = ShadeColors(
             background = Color(0xFFECF0F3),
@@ -130,12 +179,24 @@ fun ShadeTheme(content: @Composable () -> Unit) {
         val scheme = if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
         colors = colors.copy(accent = scheme.primary)
     }
+    // ⚠️ v2 唱臂三件套 / LED 胶囊从 colorScheme 角色取色（m3Roles 表）。
+    //    这里只显式设了 5 个角色的话，surfaceContainerHighest / secondaryContainer /
+    //    secondary / surfaceVariant 等会落到 M3 基线紫 —— 必须按 ShadeColors + accent 补齐
+    //    （浅色往黑压、深色往白提，两套都校过；accent 走莫奈时它们自动跟随）。
     val scheme = if (colors.isDark) darkColorScheme(
         background = colors.background, surface = colors.background,
         onBackground = colors.textPrimary, onSurface = colors.textPrimary, primary = colors.accent,
+        surfaceContainerHighest = colors.surfaceContainerHighest,
+        surfaceVariant = colors.surfaceVariant,
+        secondaryContainer = colors.secondaryContainer,
+        secondary = colors.secondary,
     ) else lightColorScheme(
         background = colors.background, surface = colors.background,
         onBackground = colors.textPrimary, onSurface = colors.textPrimary, primary = colors.accent,
+        surfaceContainerHighest = colors.surfaceContainerHighest,
+        surfaceVariant = colors.surfaceVariant,
+        secondaryContainer = colors.secondaryContainer,
+        secondary = colors.secondary,
     )
     CompositionLocalProvider(
         LocalShadeColors provides colors,
