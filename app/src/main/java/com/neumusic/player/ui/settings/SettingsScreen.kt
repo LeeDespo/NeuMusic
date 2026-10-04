@@ -208,7 +208,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 }
             }
             }
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(if (tab == 0) 18.dp else 0.dp))
 
             AnimatedVisibility(
                 visible = tab == 3,
@@ -244,7 +244,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 )
             }
             }
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(if (tab == 3) 18.dp else 0.dp))
 
             AnimatedVisibility(
                 visible = tab == 1,
@@ -362,7 +362,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 ) { showTrans = it; Prefs.showLyricTranslation = it }
             }
             }
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(if (tab == 1) 18.dp else 0.dp))
 
             AnimatedVisibility(
                 visible = tab == 2,
@@ -484,7 +484,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 }
             }
             }
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(if (tab == 2) 18.dp else 0.dp))
 
             AnimatedVisibility(
                 visible = tab == 4,
@@ -534,7 +534,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 )
             }
             }
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(if (tab == 4) 18.dp else 0.dp))
 
             AnimatedVisibility(
                 visible = tab == 3,
@@ -578,7 +578,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 ) { vinyl = it; Prefs.vinylMode = it }
             }
             }
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(if (tab == 3) 18.dp else 0.dp))
 
             AnimatedVisibility(
                 visible = tab == 5,
@@ -657,7 +657,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                     Text("已清空", fontSize = 11.sp, color = colors.textTertiary, modifier = Modifier.padding(8.dp))
                 }
             }
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(if (tab == 5) 18.dp else 0.dp))
 
             // ── 关于 ──
             SectionTitle("关于")
@@ -678,8 +678,9 @@ fun SettingsScreen(onBack: () -> Unit) {
                     fontSize = 11.sp, color = colors.textTertiary,
                 )
             }
-            Spacer(Modifier.height(24.dp + barSpace))   // 底部留白：播放栏实测高度
             }
+            // 所有标签共用的滚动内容都在播放栏和系统导航栏之前结束，保证各分区都有完整底部留白。
+            Spacer(Modifier.height(24.dp + barSpace))
         }
             if (scroll.value > 0) TopEdgeFade()
         }

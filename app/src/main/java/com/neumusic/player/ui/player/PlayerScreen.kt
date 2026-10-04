@@ -147,16 +147,15 @@ fun PlayerScreen(onBack: () -> Unit, onOpenEqualizer: () -> Unit = {}) {
     val turntable = remember { VinylTurntableState(scope) }
     LaunchedEffect(Unit) { turntable.start() }
     LaunchedEffect(playing) { turntable.setPlaying(playing) }
-    LaunchedEffect(track?.mid) { turntable.onTrackChanged(track?.coverUrl.orEmpty()) }
+    LaunchedEffect(track?.mid) { turntable.onTrackChanged(track?.coverUrl.orEmpty(), track?.mid.orEmpty()) }
     // v2 §5：唱头半径与播放进度**线性绑定**，500ms 轮询对进度条够用、对唱头不够
-    // （半径全程只走 0.16 D，500ms 一步 ≈ 9 px 的一顿）。给转盘挂一个**每帧采样**的位置源，
+    // （拖动进度与播放速率变化也要及时反映）。给转盘挂一个**每帧采样**的位置源，
     // 只驱动唱臂、不进任何 Compose 状态 → 不引起重组。
     LaunchedEffect(Unit) {
         turntable.positionSource = { PlayerHost.positionMs() }
         turntable.durationSource = { PlayerHost.durationMs() }
     }
-    // 自动换片的提前量：真实播放器不通知「还剩几秒」，用「位置 + 时长」自己算。
-    // 500ms 轮询 → 触发最多晚 0.5s（规格 §5.5 接受这个抖动）。
+    // 暂停时仍更新进度；片尾直接跟随真实播放状态与曲目变化，避免预抬后重复起播。
     LaunchedEffect(pos, dur, playing) { turntable.onPosition(pos, dur) }
 
     // 切歌后的红心状态：直接读全局缓存（LikedList 已翻页取全），

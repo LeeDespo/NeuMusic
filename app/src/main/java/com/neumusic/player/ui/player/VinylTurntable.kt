@@ -24,7 +24,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathFillType
@@ -45,7 +44,6 @@ import com.neumusic.player.shade.LocalReliefScale
 import com.neumusic.player.shade.LocalShadeColors
 import com.neumusic.player.shade.LocalShadeShadowAlpha
 import com.neumusic.player.shade.REF_OFFSET_DP
-import com.neumusic.player.shade.ShadeColors
 import com.neumusic.player.shade.tempTint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -56,7 +54,7 @@ import kotlin.math.sin
 
 /**
  * 黑胶转盘（主工程，**v2**）。几何、光影画法、阶段机全部从唱片实验室 `~/Documents/VinylLab`
- * 移植，只换两处（规格 §8 说好的唯一差异）：
+ * 移植，以它为基准接入真实播放器；2026-10-04 另按用户新要求重画机械件并修复换片：
  *
  *  1. **光照来源**：实验室是 ShadeLab 的绝对 dp 版（`LightState`），这里换成主工程
  *     `shade/DayLight.kt` 的**倍数**版 [Lighting] —— 位移/模糊按
@@ -65,7 +63,7 @@ import kotlin.math.sin
  *  2. **驱动源**：实验室是假时间轴，这里是真播放器（`PlayerHost`）。
  *
  * ⚠️ **本组件只跟随播放、不驱动播放**（这是对规格 §5.3 的有意简化，理由如下）：
- * 规格 §5.3 要求「armLower 结束才 play()、进 discSwap 时 nextPrepared()」，那需要给
+ * 旧规格要求「armLower 结束才 play()、进 discSwap 时 nextPrepared()」，那需要给
  * `PlayerHost` 新增 `nextPrepared()` / `setAutoAdvanceSuppressed()` 并接管全部 7 个
  * 播放入口。本工程已有 `onPlaybackStateChanged(STATE_ENDED) → advance()` 这套成熟机制，
  * 两套「谁负责换歌」并存必然双切（规格 §5.2 自己也警告过）。所以这里**只观察**：
@@ -80,29 +78,18 @@ enum class VinylPhase(val ms: Int) {
 /** 起播弧线总时长 = armCue + armLower：**一条缓动曲线横跨两个阶段**（规格 §3.2 段 1）。 */
 const val START_ARC_MS = 1200 + 260
 
-/**
- * 「片尾提前量」= 抬针 + 回臂 + 减速 = 240 + 620 + 700 = **1560 ms**。
- *
- * 规格的 `AUTO_LEAD_MS = 4240` 是**换片全套**（含 discSwap 与重新起播），那属于
- * 「动画自己负责换歌」的算法。本组件只跟随播放：唱针要在**歌真的放完之前**抬起来、
- * 盘在换片前停住，而「换片」本身得等 `PlayerHost` 把新曲目送来（ENDED→advance）
- * 才有新封面可画。所以提前量只需要这 1560 ms —— 走到「时长 − 1560」时抬针，
- * 正好在歌结束时臂已归位、盘已停，接着换片。
- */
-const val END_LEAD_MS: Int = 240 + 620 + 700
-
 /** 起播弧线的缓动：加速—减速到外圈收住（到点即稳，没有中段停顿）。 */
 val START_ARC_EASING: Easing = FastOutSlowInEasing
 
 /** 换片段时长（旧封面滑出 / 新封面滑入）。 */
 private const val SWAP_MS = 620
 
-// GEO-CHECK stageW=1.540 discCx=0.770 discCy=0.630 pivotX=1.270 pivotY=0.210 rOut=0.480 rIn=0.320 headOffset=18.0 innerOuter=0.320
+// GEO-CHECK stageW=1.540 discCx=0.770 discCy=0.630 pivotX=1.270 pivotY=0.210 rOut=0.480 rIn=0.320 headOffset=20.0 innerOuter=0.320
 // ↑ 机器可读：字段与实验室启动日志的 `GEO …` 完全一致（discD 是运行时 dp，故不在常量表里）。
 //   三个臂角由 P=0.6529931/θp=−40.03026° 反解（81.3315 / 96.8770 / 111.6255），不手填。
 /**
  * 唱片几何：全部以**唱片直径 D** 为单位，数值来自参考图实测 + 实验室四轮视觉评审校准
- * （每一版的读数都记在实验室 README 的「第 N 轮改了什么」里），移植时原样照搬。
+ * （原读数记在实验室 README），舞台和纹路保留；机械件按 2026-10-04 要求调整。
  */
 object VinylGeo {
     /** 主工程原有的盘径常量（`PlayerScreen.DISC_SIZE = 264.dp`）。 */
@@ -153,7 +140,7 @@ object VinylGeo {
     /** 支点反算：P=√(0.5²+0.42²)=0.6529931、θp=atan2(−0.42,0.50)=−40.03026°。 */
     const val PIVOT_DIST = 0.6529931f
     const val PIVOT_ANGLE = -40.03026f
-    /** 支点 → 臂末端（= 针尖，口径 A）0.654 D。 */
+    /** 支点 → 唱头前端的有效长度 0.654 D；臂管长度由内折角反解。 */
     const val ARM_LEN = 0.654f
 
     /** 臂角由目标半径反解（不手填）：cosArg=(r²−P²−L²)/(2PL)，α=θp+acos(cosArg)。 */
@@ -173,13 +160,13 @@ object VinylGeo {
     /** armLift 的抬臂量（半径外移），让「暂停」看得见一个离盘动作。 */
     const val R_LIFT = 0.03f
 
-    /** 唱头相对臂轴的内折角（度，屏幕系 y 向下取 **+18°**，偏向盘心/切向那支）。 */
-    const val HEAD_OFFSET_DEG = 18f
-    /** 底座转轴 0.10 D（M3 同心圆）、唱头 / 臂管尺寸（M3 胶囊，加粗后已重核待机净空）。 */
+    /** 唱头相对臂轴的内折角（度，屏幕系 y 向下取 **+20°**，偏向盘心/切向那支）。 */
+    const val HEAD_OFFSET_DEG = 20f
+    /** M3 Expressive 大色块底座及细胶囊臂管尺寸。 */
     const val PIVOT_BASE_R = 0.10f
     const val HEAD_L = 0.135f
-    const val HEAD_W = 0.105f
-    const val ARM_W = 0.050f
+    const val HEAD_W = 0.090f
+    const val ARM_W = 0.034f
 
     /** 播放段：进度 → 半径的**线性**绑定（规格 §3.2 段 2）。 */
     fun radiusForProgress(p: Float): Float = R_OUT + (R_IN - R_OUT) * p.coerceIn(0f, 1f)
@@ -205,11 +192,11 @@ private fun logPhase(p: VinylPhase, t: Int) {
  *
  * 三个外部信号（`PlayerScreen` 喂进来）：
  *  - [setPlaying]：`PlayerHost.isPlaying`
- *  - [setCover]：`PlayerHost.current` 的封面 —— 曲目切换
- *  - [onPosition]：`位置 + 时长` —— 走到「时长 − 提前量」就抬针，为片尾换片让路
+ *  - [onTrackChanged]：`PlayerHost.current` 的封面 —— 曲目切换
+ *  - [onPosition]：暂停时更新位置/时长，播放中按真实进度走弧线
  *
  * 阶段链（与实验室一致）：
- *  - 起播：discAccel(900) → armCue(900) → armLower(260) → playing
+ *  - 起播：discAccel(900) → armCue(1200) → armLower(260) → playing
  *  - 停：armLift(240) → armReturn(620) → discDecel(700) → idle
  *  - 换片：armLift → armReturn → discDecel → discSwap(620) → （还在播则）discAccel → …
  *
@@ -254,22 +241,23 @@ class VinylTurntableState(private val scope: CoroutineScope) {
 
     /**
      * **细粒度位置源**（v2，规格 §5）：`PlayerScreen` 原有的 500ms 轮询对进度条够用，
-     * 对唱头不够（半径全程只走 0.16 D，500ms 一步就是 0.04 D ≈ 9 px 的一顿）。
+     * 唱头还要及时响应 seek 与播放速率变化，所以保留每帧位置源。
      * 帧循环里每帧调它取位置（ExoPlayer 的 `currentPosition` 是音频时钟插值，代价低），
      * 只驱动唱臂半径、不进任何 Compose 状态 → 不引起重组。
      */
     var positionSource: (() -> Long)? = null
     var durationSource: (() -> Long)? = null
 
-    /** 最新采到的位置/时长（供起播弧线取目标半径、片尾提前量判断）。 */
+    /** 最新采到的位置/时长（供起播弧线取目标半径）。 */
     private var lastPositionMs = 0L
     private var lastDurationMs = 0L
 
     /** 外部信号（主线程读写）。 */
     private var playing = false
     private var pendingCover: String? = null
-    private var armedForSwap = false
-    private var lastEndParkAt = 0L
+    private var currentTrackId: String? = null
+    private var trackRevision = 0L
+    private var pendingAt = 0L
 
     private var job: Job? = null
     private var frameJob: Job? = null
@@ -338,7 +326,6 @@ class VinylTurntableState(private val scope: CoroutineScope) {
 
     fun setPlaying(v: Boolean) {
         playing = v
-        if (!v) armedForSwap = false
     }
 
     /**
@@ -347,40 +334,29 @@ class VinylTurntableState(private val scope: CoroutineScope) {
      *
      * ⚠️ 方法名不能叫 `setCover`：`cover` 属性的生成 setter 就是 `setCover`，会 JVM 签名冲突。
      */
-    fun onTrackChanged(url: String) {
-        if (url == cover && pendingCover == null) return
-        if (cover.isEmpty()) {
+    fun onTrackChanged(url: String, trackId: String = url) {
+        if (trackId == currentTrackId) return
+        val first = currentTrackId == null
+        currentTrackId = trackId
+        trackRevision++
+        if (first) {
             cover = url; coverOld = url; coverNew = url
             return
         }
         pendingCover = url
+        pendingAt = System.nanoTime()
     }
 
-    /**
-     * 位置采样（PlayerScreen 的 500ms 轮询喂进来）。两件事：
-     *  1. 记下最新位置/时长 —— 起播弧线的目标半径按它算（暂停时也能拿到）；
-     *  2. 走到「时长 − 提前量」就抬针（一次片尾只触发一次）。
-     */
+    /** 暂停时的进度采样；播放段由 frameLoop 细粒度采样，不预抬臂接管片尾。 */
     fun onPosition(positionMs: Long, durationMs: Long) {
         lastPositionMs = positionMs
         lastDurationMs = durationMs
-        if (!playing || durationMs <= 0L) return
-        if (phase != VinylPhase.playing) return
-        val lead = minOf(END_LEAD_MS.toLong(), (durationMs / 2).coerceAtLeast(1L))
-        if (positionMs >= durationMs - lead) {
-            val now = System.nanoTime()
-            if (now - lastEndParkAt > 2_000_000_000L) {   // 2s 去抖
-                lastEndParkAt = now
-                armedForSwap = true
-            }
-        }
     }
 
     /** 回到待机（退出播放页等场景可选调用）。 */
     fun reset() {
         playing = false
         pendingCover = null
-        armedForSwap = false
         platterSpeed = 0f
         platterAngle = 0f
         writeTipRadius(VinylGeo.R_STANDBY)
@@ -418,12 +394,13 @@ class VinylTurntableState(private val scope: CoroutineScope) {
         while (true) {
             when (phase) {
                 VinylPhase.idle -> {
-                    armedForSwap = false
                     writeTipRadius(VinylGeo.R_STANDBY)
-                    await { playing }
+                    await { playing || pendingCover != null }
                     // 停在待机时换来的新片：先演换片，再起播
-                    if (pendingCover != null) enter(VinylPhase.discSwap)
-                    else enter(VinylPhase.discAccel)
+                    if (pendingCover != null) {
+                        awaitTrackQuiet()
+                        enter(VinylPhase.discSwap)
+                    } else enter(VinylPhase.discAccel)
                 }
 
                 VinylPhase.discAccel -> {
@@ -465,7 +442,7 @@ class VinylTurntableState(private val scope: CoroutineScope) {
 
                 // ── 段 2 · 播放：半径由帧循环按进度线性绑定（见 frameLoop）──
                 VinylPhase.playing -> {
-                    await { !playing || pendingCover != null || armedForSwap }
+                    await { !playing || pendingCover != null }
                     enter(VinylPhase.armLift)
                 }
 
@@ -486,13 +463,20 @@ class VinylTurntableState(private val scope: CoroutineScope) {
 
                 VinylPhase.discDecel -> {
                     tweenSpeed(0f, VinylPhase.discDecel.ms, LinearOutSlowInEasing)
+                    // 快速切歌仅延后视觉换片，音频仍由 PlayerHost 即时切换。
+                    if (pendingCover != null) awaitTrackQuiet()
                     // 减速走完才换片（新片必须在静止状态滑入）
                     leaveTo(if (pendingCover != null) VinylPhase.discSwap else VinylPhase.idle)
                 }
 
                 VinylPhase.discSwap -> {
                     swapStep()
-                    leaveTo(if (playing) VinylPhase.discAccel else VinylPhase.idle)
+                    if (pendingCover != null) {
+                        awaitTrackQuiet()
+                        leaveTo(VinylPhase.discSwap)
+                    } else {
+                        leaveTo(if (playing) VinylPhase.discAccel else VinylPhase.idle)
+                    }
                 }
             }
         }
@@ -511,11 +495,18 @@ class VinylTurntableState(private val scope: CoroutineScope) {
 
     /** 换片：旧封面左滑淡出 → 新封面右滑淡入；结束才把 [cover] 换成新的。 */
     private suspend fun swapStep() {
-        val next = pendingCover ?: cover
+        var next = pendingCover ?: cover
+        var revision = trackRevision
         coverOld = cover
         coverNew = next
         swapOutAlpha = 1f; swapOutDx = 0f; swapInAlpha = 0f; swapInDx = 0.10f
         tweenTo(0f, 1f, SWAP_MS, FastOutSlowInEasing) { t ->
+            // 新封面尚未入场时可重定位；入场后新请求留给下一轮，不能清掉。
+            if (t <= 0.5f && trackRevision != revision) {
+                next = pendingCover ?: next
+                revision = trackRevision
+                coverNew = next
+            }
             val out = (t / 0.5f).coerceIn(0f, 1f)
             val inn = ((t - 0.5f) / 0.5f).coerceIn(0f, 1f)
             swapOutAlpha = 1f - out
@@ -526,8 +517,11 @@ class VinylTurntableState(private val scope: CoroutineScope) {
         cover = next
         coverOld = next
         swapOutAlpha = 1f; swapOutDx = 0f; swapInAlpha = 1f; swapInDx = 0f
-        pendingCover = null
-        armedForSwap = false
+        if (trackRevision == revision) pendingCover = null
+    }
+
+    private suspend fun awaitTrackQuiet() {
+        await { System.nanoTime() - pendingAt >= 3_000_000_000L }
     }
 
     /** 帧驱动等待：每帧重算一次谓词，条件成立才返回（挂起，不空转）。 */
@@ -675,177 +669,82 @@ private fun DrawScope.m3Elevation(
     }
 }
 
-/**
- * 底座转轴（M3 · **同心圆**）：三层同心中性圆（surfaceContainerHighest 系，色块分层、无描边）
- * + 一段受光弧。v1 的「硬边圆盘 + 左上亮弧/右下暗弧」是新拟物两影，唱臂改 M3 后不再用。
- */
+/** M3 Expressive 底座：一个完整色块，不叠加金属高光或同心装饰。 */
 private fun DrawScope.drawPivotBaseV2(
-    c: Offset, r: Float, palette: M3Palette, alphaScale: Float, lighting: Lighting,
+    c: Offset, r: Float, palette: M3Palette, alphaScale: Float,
 ) {
-    fun circle(radius: Float): Path = Path().apply {
-        addOval(Rect(c.x - radius, c.y - radius, c.x + radius, c.y + radius))
-    }
-    m3Elevation(circle(r), 3.dp.toPx(), 5.dp.toPx(), 9.dp.toPx(), 16.dp.toPx(), alphaScale)
-    drawPath(circle(r), palette.base)
-    drawPath(circle(r * 0.70f), palette.pivotMid)
-    drawPath(circle(r * 0.34f), palette.pivotSpindle)
-    // 受光弧：中心角由光照方向定（屏幕系 0°=右、90°=下；光在 (−ux,−uy) 那侧）
-    val arcCenter = Math.toDegrees(
-        kotlin.math.atan2(-lighting.uy.toDouble(), -lighting.ux.toDouble()),
-    ).toFloat()
-    drawIntoCanvas { canvas ->
-        val rr = r * 0.86f
-        val rect = android.graphics.RectF(c.x - rr, c.y - rr, c.x + rr, c.y + rr)
-        val p = android.graphics.Path()
-        p.arcTo(rect, arcCenter - 75f, 150f, true)
-        canvas.nativeCanvas.drawPath(
-            p,
-            nativePaint(palette.pivotHi, 0.55f, 3.dp.toPx()).apply {
-                style = android.graphics.Paint.Style.STROKE
-                strokeWidth = r * 0.16f
-                strokeCap = android.graphics.Paint.Cap.ROUND
-            },
-        )
-    }
+    val base = Path().apply { addOval(Rect(c.x - r, c.y - r, c.x + r, c.y + r)) }
+    m3Elevation(base, 2.dp.toPx(), 3.dp.toPx(), 5.dp.toPx(), 8.dp.toPx(), alphaScale)
+    drawPath(base, palette.base)
 }
 
 /**
- * 唱臂三件套（M3）：**胶囊臂管**（`drawLine` + Round 端帽）+ **倒角矩形唱头**（内折 18°）+
- * 针尖标记点。全部靠色块区分、无描边；高光条**朝光源那一侧**（把光方向投影到臂管法向）。
- *
- * ⚠️ 两个实验室踩过的坑（都曾"静默失效"）：
- *  ① 胶囊必须沿臂轴画：`drawLine(pivot, tubeEnd, cap = Round)` 就是一条胶囊。
- *     绝不能拿「线段的 AABB 四角各外扩 armW/2」当胶囊 —— 斜线的 AABB 比管子宽得多
- *     （臂角 81° 时 AABB 宽 82px、真管宽只有 28px），画出来是一根厚板。
- *  ② 唱头的旋转必须让**绘制**发生在 `rotate` 块里，且角度基准是 `headDeg − 90`：
- *     唱头矩形是竖着建的（长边沿局部 +y，本就是 90°），画布 rotate(θ) 把方向映射到 φ+θ，
- *     所以 θ = headDeg − 90 才能让长轴落在唱头轴（臂角+18°）上。
+ * 保留针尖的既有半径轨迹，反解连接点：唱头从连接点沿内折 20° 的轴伸出。
+ * ARM_LEN 是支点到针尖的有效长度；臂管与唱头构成固定刚体，不绕唱头中心折转。
  */
 private fun DrawScope.drawTonearmV2(
     palette: M3Palette,
-    lighting: Lighting,
     alphaScale: Float,
     discPx: Float,
     tipRadius: Float,
 ) {
-    val pivot = Offset(
-        VinylGeo.pivotX(discPx), VinylGeo.pivotY(discPx),
-    )
-    val armLen = discPx * VinylGeo.ARM_LEN
-    val a = VinylGeo.armAngleForRadius(tipRadius)
-    val tip = Offset(
-        pivot.x + armLen * cos(Math.toRadians(a.toDouble())).toFloat(),
-        pivot.y + armLen * sin(Math.toRadians(a.toDouble())).toFloat(),
-    )
-    val armW = discPx * VinylGeo.ARM_W
+    val pivot = Offset(VinylGeo.pivotX(discPx), VinylGeo.pivotY(discPx))
+    val effectiveLength = discPx * VinylGeo.ARM_LEN
+    val tipAngle = Math.toRadians(VinylGeo.armAngleForRadius(tipRadius).toDouble())
+    val offsetAngle = Math.toRadians(VinylGeo.HEAD_OFFSET_DEG.toDouble())
     val headL = discPx * VinylGeo.HEAD_L
     val headW = discPx * VinylGeo.HEAD_W
+    val armW = discPx * VinylGeo.ARM_W
+    val lateral = headL * sin(offsetAngle)
+    val axial = kotlin.math.sqrt(effectiveLength * effectiveLength - lateral * lateral)
+    val armAngle = tipAngle - kotlin.math.atan2(lateral, axial.toDouble())
+    val armLength = axial - headL * cos(offsetAngle)
+    val joint = pivot + Offset(
+        (armLength * cos(armAngle)).toFloat(),
+        (armLength * sin(armAngle)).toFloat(),
+    )
+    val headRotation = Math.toDegrees(armAngle + offsetAngle).toFloat() - 90f
 
-    val dir = tip - pivot
-    val len = dir.getDistance().coerceAtLeast(1f)
-    val ux = dir.x / len; val uy = dir.y / len
-
-    // 唱头轴 = 臂角 + 内折角（+18°）；唱头体沿它的**反向**从臂末端往回长（口径 A：针尖=臂末端）
-    val hb = Math.toRadians((a + VinylGeo.HEAD_OFFSET_DEG).toDouble())
-    val hux = cos(hb).toFloat(); val huy = sin(hb).toFloat()
-    val hnx = -huy; val hny = hux
-    val headBack = Offset(tip.x - hux * headL, tip.y - huy * headL)
-    val headCenter = Offset((tip.x + headBack.x) / 2f, (tip.y + headBack.y) / 2f)
-    // 臂管末端收进唱头体内一点（两件之间不留缝，同色系相接、不靠描边）
-    val tubeEnd = Offset(tip.x - ux * headL * 0.55f, tip.y - uy * headL * 0.55f)
-
-    // ── 1. 臂管（M3 胶囊）：两层 elevation 影 → 色块 → 高光条 ──
-    fun tubeShadow(paint: android.graphics.Paint, dx: Float, dy: Float) {
-        drawIntoCanvas { canvas ->
-            val nc = canvas.nativeCanvas
-            nc.save(); nc.translate(dx, dy)
-            nc.drawLine(pivot.x, pivot.y, tubeEnd.x, tubeEnd.y, paint)
-            nc.restore()
-        }
+    // 细胶囊臂管：单一色块，短柔影，不再画亮条。
+    drawIntoCanvas { canvas ->
+        val nc = canvas.nativeCanvas
+        nc.save()
+        nc.translate(0f, 2.dp.toPx())
+        nc.drawLine(pivot.x, pivot.y, joint.x, joint.y,
+            nativePaint(Color.Black, 0.16f * alphaScale, 4.dp.toPx()).apply {
+                style = android.graphics.Paint.Style.STROKE
+                strokeWidth = armW
+                strokeCap = android.graphics.Paint.Cap.ROUND
+            })
+        nc.restore()
     }
-    tubeShadow(
-        nativePaint(Color.Black, 0.14f * alphaScale, 13.dp.toPx())
-            .apply { style = android.graphics.Paint.Style.STROKE; strokeWidth = armW; strokeCap = android.graphics.Paint.Cap.ROUND },
-        0f, 7.dp.toPx(),
-    )
-    tubeShadow(
-        nativePaint(Color.Black, 0.20f * alphaScale, 4.dp.toPx())
-            .apply { style = android.graphics.Paint.Style.STROKE; strokeWidth = armW; strokeCap = android.graphics.Paint.Cap.ROUND },
-        0f, 2.5.dp.toPx(),
-    )
-    drawLine(palette.arm, pivot, tubeEnd, strokeWidth = armW, cap = StrokeCap.Round)
+    drawLine(palette.arm, pivot, joint, strokeWidth = armW, cap = StrokeCap.Round)
 
-    // 高光条：把光方向（指向光源 = −(ux,uy)）投影到臂管法向 → 定侧与幅值
-    val nx = -uy; val ny = ux
-    val side = ((-lighting.ux) * nx + (-lighting.uy) * ny).coerceIn(-1f, 1f)
-    val inset = armW * 0.30f * side
-    val s0 = Offset(pivot.x + ux * armW * 0.9f, pivot.y + uy * armW * 0.9f)
-    val s1 = Offset(tubeEnd.x - ux * armW * 0.6f, tubeEnd.y - uy * armW * 0.6f)
-    drawLine(
-        color = palette.armHi.copy(alpha = 0.85f * lighting.alphaLight),
-        start = s0 + Offset(nx * inset, ny * inset),
-        end = s1 + Offset(nx * inset, ny * inset),
-        strokeWidth = armW * 0.19f, cap = StrokeCap.Round,
-    )
-
-    // ── 2. 唱头：倒角矩形，绕连接点内折 18°（长边沿唱头轴）──
-    val corner = headW * 0.30f
-    val headRot = a + VinylGeo.HEAD_OFFSET_DEG - 90f
+    // 局部 +y 从连接点向针尖延伸；旋转支点就是 joint。
+    val corner = headW * 0.25f
     val head = Path().apply {
-        addRoundRect(
-            RoundRect(
-                headCenter.x - headW / 2f, headCenter.y - headL / 2f,
-                headCenter.x + headW / 2f, headCenter.y + headL / 2f,
-                androidx.compose.ui.geometry.CornerRadius(corner, corner),
-            ),
-        )
+        addRoundRect(RoundRect(
+            joint.x - headW / 2f, joint.y - armW * 0.20f,
+            joint.x + headW / 2f, joint.y + headL,
+            androidx.compose.ui.geometry.CornerRadius(corner, corner),
+        ))
+        // Finger Lift：外侧短胶囊与唱头合为同一轮廓、同一色块。
+        val liftTop = joint.y + headL * 0.34f
+        val liftHeight = headW * 0.24f
+        addRoundRect(RoundRect(
+            joint.x + headW * 0.38f, liftTop,
+            joint.x + headW * 0.82f, liftTop + liftHeight,
+            androidx.compose.ui.geometry.CornerRadius(liftHeight / 2f, liftHeight / 2f),
+        ))
     }
-    rotate(headRot, headCenter) {
-        m3Elevation(head, 3.dp.toPx(), 5.dp.toPx(), 8.dp.toPx(), 14.dp.toPx(), alphaScale)
+    rotate(headRotation, joint) {
+        m3Elevation(head, 2.dp.toPx(), 3.dp.toPx(), 4.dp.toPx(), 7.dp.toPx(), alphaScale)
         drawPath(head, palette.head)
-        // 内嵌面板（亮一档，靠色块分层次）
-        val panel = Path().apply {
-            addRoundRect(
-                RoundRect(
-                    headCenter.x - headW * 0.30f, headCenter.y - headL * 0.30f,
-                    headCenter.x + headW * 0.30f, headCenter.y + headL * 0.30f,
-                    androidx.compose.ui.geometry.CornerRadius(corner * 0.6f, corner * 0.6f),
-                ),
-            )
-        }
-        drawPath(panel, palette.headPanel)
-        // 受光侧高光：沿唱头法向、朝光源一侧（与臂管同一条规则）
-        val panelInset = headW * 0.28f * side
-        drawLine(
-            color = palette.headHi.copy(alpha = 0.75f * lighting.alphaLight),
-            start = Offset(headCenter.x - hux * headL * 0.30f, headCenter.y - huy * headL * 0.30f) +
-                Offset(hnx * panelInset, hny * panelInset),
-            end = Offset(headCenter.x + hux * headL * 0.30f, headCenter.y + huy * headL * 0.30f) +
-                Offset(hnx * panelInset, hny * panelInset),
-            strokeWidth = headW * 0.17f, cap = StrokeCap.Round,
-        )
-        // 针尖标记：整个落在唱头矩形内（沿唱头轴往里退 0.26·HEAD_L），primary 系
-        drawCircle(
-            palette.dot,
-            radius = headW * 0.17f,
-            center = Offset(tip.x - hux * headL * 0.26f, tip.y - huy * headL * 0.26f),
-        )
     }
 }
 
-/** M3 三件套的色板（从 `MaterialTheme.colorScheme` 角色 + ShadeColors 派生位取，见 Shade.kt）。 */
-private class M3Palette(
-    val base: Color,
-    val pivotMid: Color,
-    val pivotSpindle: Color,
-    val pivotHi: Color,
-    val arm: Color,
-    val armHi: Color,
-    val head: Color,
-    val headPanel: Color,
-    val headHi: Color,
-    val dot: Color,
-)
+/** 三个独立完整色块均来自主题角色。 */
+private class M3Palette(val base: Color, val arm: Color, val head: Color)
 
 /**
  * 黑胶转盘。调用方给**唱片直径**（[discD]）与状态机（[state]），
@@ -863,25 +762,15 @@ fun VinylTurntable(
     val colors = LocalShadeColors.current
     val relief = LocalReliefScale.current
     val shadowAlphaState = LocalShadeShadowAlpha.current
-    val lighting = DayLightHost.current(colors.isDark)
     val d = discD
     val holeD = d * VinylGeo.HOLE_RATIO
     val coverD = d * VinylGeo.COVER_RATIO
 
-    // ── M3 三件套的色板：m3Roles 表的 5 个角色从 **colorScheme** 取（ShadeTheme 已按
-    //    ShadeColors + accent 补齐），派生位（面板/高光/针尖点）从 ShadeColors 取。
     val scheme = MaterialTheme.colorScheme
     val palette = M3Palette(
         base = scheme.surfaceContainerHighest,
-        pivotMid = lerp(scheme.surfaceContainerHighest, MaterialTheme.colorScheme.secondary, 0.10f),
-        pivotSpindle = lerp(scheme.surfaceContainerHighest, scheme.secondary, 0.22f),
-        pivotHi = lerp(scheme.surfaceContainerHighest, Color.White, 0.34f),
         arm = scheme.secondaryContainer,
-        armHi = lerp(scheme.secondaryContainer, Color.White, if (colors.isDark) 0.12f else 0.26f),
         head = scheme.secondary,
-        headPanel = colors.headPanel,
-        headHi = colors.headHi,
-        dot = colors.spindleDot,
     )
 
     Box(
@@ -897,6 +786,7 @@ fun VinylTurntable(
                 .graphicsLayer { translationX = offX.toPx(); translationY = offY.toPx() }
                 .size(d)
                 .drawBehind {
+                    val lighting = DayLightHost.current(colors.isDark)
                     // 与 shadeSurface 同一套算法：外阴影（亮/暗两影）→ 盘面
                     val a = shadowAlphaState.floatValue
                     val v = shadeVec(lighting, 6.dp.toPx() * relief)
@@ -923,7 +813,7 @@ fun VinylTurntable(
                 .size(d),
         ) {
             Canvas(Modifier.fillMaxSize()) {
-                drawGroovesV2(lighting, d.toPx(), colors.background, colors.isDark)
+                drawGroovesV2(DayLightHost.current(colors.isDark), d.toPx(), colors.background, colors.isDark)
             }
         }
 
@@ -964,6 +854,7 @@ fun VinylTurntable(
                 }
                 .size(holeD)
                 .drawBehind {
+                    val lighting = DayLightHost.current(colors.isDark)
                     val deep = lerp(colors.background, Color.Black, if (colors.isDark) 0.78f else 0.66f)
                     val wall = lerp(deep, Color.Black, 0.55f)
                     val c = Offset(size.width / 2f, size.height / 2f)
@@ -988,7 +879,7 @@ fun VinylTurntable(
                 },
         )
 
-        // ── 静止层 4：底座转轴（M3 同心圆）——**独立一层**：它不随唱臂动，显示列表可缓存
+        // ── 静止层 4：底座转轴（M3 完整圆形色块）——**独立一层**：它不随唱臂动，显示列表可缓存
         //    （与「底盘 vs 旋转封面」同一条性能纪律；两层大模糊每帧重录实测把帧时间拖爆）。
         Canvas(Modifier.fillMaxSize()) {
             drawPivotBaseV2(
@@ -996,7 +887,6 @@ fun VinylTurntable(
                 d.toPx() * VinylGeo.PIVOT_BASE_R,
                 palette,
                 shadowAlphaState.floatValue,
-                lighting,
             )
         }
 
@@ -1004,7 +894,6 @@ fun VinylTurntable(
         Canvas(Modifier.fillMaxSize()) {
             drawTonearmV2(
                 palette = palette,
-                lighting = lighting,
                 alphaScale = shadowAlphaState.floatValue,
                 discPx = d.toPx(),
                 tipRadius = state.drawTipRadius,

@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -34,6 +35,7 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
@@ -140,6 +142,11 @@ fun TrackRow(
     /** 已下载：整行置灰、不可选（用户要求）。 */
     downloaded: Boolean = false,
     onToggleSelect: () -> Unit = {},
+    /** 队列弹窗用于强调当前曲目，并隐藏普通列表里的「更多」入口。 */
+    current: Boolean = false,
+    showMore: Boolean = true,
+    /** 仅队列行使用：点击区扩展到整行，且不裁剪画框阴影。 */
+    wholeRowClickable: Boolean = false,
 ) {
     val colors = LocalShadeColors.current
     val haptic = LocalHapticFeedback.current
@@ -157,6 +164,14 @@ fun TrackRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .then(
+                if (wholeRowClickable) Modifier.pointerInput(onPlay) {
+                    detectTapGestures {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onPlay()
+                    }
+                } else Modifier
+            )
             .background(bg)
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -170,14 +185,14 @@ fun TrackRow(
         Row(
             Modifier
                 .weight(1f)
-                .flatPressable(cornerRadius = 14.dp) {
+                .then(if (wholeRowClickable) Modifier else Modifier.flatPressable(cornerRadius = 14.dp) {
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     when {
                         downloaded -> Unit // 已下载：不响应（置灰不可选）
                         selecting -> onToggleSelect()
                         else -> onPlay()
                     }
-                }
+                })
                 .padding(vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -188,7 +203,7 @@ fun TrackRow(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         track.name,
-                        color = contentColor,
+                        color = if (current) colors.accent else contentColor,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Medium,
                         maxLines = 1,
@@ -205,6 +220,9 @@ fun TrackRow(
                         ) {
                             Text("VIP", color = colors.accent, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                         }
+                    }
+                    if (current) {
+                        Icon(Icons.Filled.PlayArrow, contentDescription = "正在播放", tint = colors.accent, modifier = Modifier.size(16.dp))
                     }
                 }
                 Text(
@@ -241,15 +259,17 @@ fun TrackRow(
             }
         }
 
-        // 「更多」：播放/下一首播放/歌曲信息/查看专辑/查看格式（用户要求：行内不再放下载）。
-        Box(
-            Modifier.size(38.dp).flatPressable(cornerRadius = 19.dp) { onMore() },
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                Icons.Filled.MoreVert, contentDescription = "更多",
-                tint = colors.textTertiary, modifier = Modifier.size(20.dp),
-            )
+        if (showMore) {
+            // 「更多」：播放/下一首播放/歌曲信息/查看专辑/查看格式（用户要求：行内不再放下载）。
+            Box(
+                Modifier.size(38.dp).flatPressable(cornerRadius = 19.dp) { onMore() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.MoreVert, contentDescription = "更多",
+                    tint = colors.textTertiary, modifier = Modifier.size(20.dp),
+                )
+            }
         }
     }
 }

@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -133,31 +132,18 @@ fun QueueDialog(
     onDismiss: () -> Unit,
     onPick: (Int) -> Unit,
 ) {
-    val colors = LocalShadeColors.current
     ShadeDialog(title = "播放队列（${tracks.size} 首）", onDismiss = onDismiss) {
         androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxSize()) {
             itemsIndexed(tracks) { i, t ->
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .flatPressable(cornerRadius = 0.dp) { onPick(i) }
-                        .padding(horizontal = 20.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "${i + 1}.",
-                        color = if (i == currentIndex) colors.accent else colors.textTertiary,
-                        fontSize = 12.sp, modifier = Modifier.width(34.dp),
-                    )
-                    Text(
-                        t.name,
-                        color = if (i == currentIndex) colors.accent else colors.textPrimary,
-                        fontSize = 14.sp,
-                        fontWeight = if (i == currentIndex) FontWeight.SemiBold else FontWeight.Normal,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
+                TrackRow(
+                    track = t,
+                    onPlay = { onPick(i) },
+                    onMore = {},
+                    current = i == currentIndex,
+                    showMore = false,
+                    wholeRowClickable = true,
+                )
+                if (i != tracks.lastIndex) RowDivider()
             }
         }
     }
