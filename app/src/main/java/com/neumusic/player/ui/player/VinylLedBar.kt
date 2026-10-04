@@ -12,6 +12,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.neumusic.player.data.Prefs
 import com.neumusic.player.player.PlayerHost
 import com.neumusic.player.player.VizHost
 import kotlin.math.sqrt
@@ -22,6 +23,8 @@ import kotlin.math.sqrt
  */
 @Composable
 fun VinylLedBar(span: Dp, modifier: Modifier = Modifier) {
+    val vizOn = Prefs.barVizFlow.collectAsState()
+    if (!vizOn.value) return
     val usingFft = VizHost.usingFft.collectAsState()
     val fftLevels = VizHost.levels.collectAsState()
     val pcmLevels = PlayerHost.vizProcessor.levels.collectAsState()

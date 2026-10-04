@@ -46,6 +46,7 @@ fun ShadeSwitch(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     val colors = LocalShadeColors.current
     val haptic = LocalHapticFeedback.current
@@ -62,8 +63,9 @@ fun ShadeSwitch(
         modifier
             .size(w, h)
             .shadeInset(cornerRadius = h / 2, offset = 3.dp, blur = 5.dp)
-            .pointerInput(checked) {
+            .pointerInput(checked, enabled) {
                 detectTapGestures {
+                    if (!enabled) return@detectTapGestures
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     onCheckedChange(!checked)
                 }

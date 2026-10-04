@@ -2,6 +2,7 @@ package com.neumusic.player.player
 
 import androidx.media3.common.audio.BaseAudioProcessor
 import androidx.media3.common.C
+import com.neumusic.player.data.AppLog
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.nio.ByteBuffer
@@ -20,7 +21,7 @@ import java.nio.ByteBuffer
  *
  * PCM 编码兼容 16-bit 与 float（ExoPlayer 开启 float 输出时）。
  */
-class VizProcessor : BaseAudioProcessor() {
+class VizProcessor(private val _levels: MutableStateFlow<FloatArray> = MutableStateFlow(FloatArray(16))) : BaseAudioProcessor() {
 
     companion object {
         const val BARS = 16
@@ -28,7 +29,6 @@ class VizProcessor : BaseAudioProcessor() {
     }
 
     /** 当前一帧的电平 0..1，长度 [BARS]。UI 画柱状。 */
-    private val _levels = MutableStateFlow(FloatArray(BARS))
     val levels: StateFlow<FloatArray> = _levels
 
     /** 峰值保持：快速上升、缓慢下降，观感更像频谱。 */
@@ -37,6 +37,21 @@ class VizProcessor : BaseAudioProcessor() {
     private var channels = 2
     private var pcmEncoding = C.ENCODING_PCM_16BIT
     private var lastEmit = 0L
+    private var publishingEnabled = false
+    @Volatile var publishedFrames: Long = 0
+        private set
+
+    /** Call on the playback thread, through PlayerMessage. Audio still passes through. */
+    fun setPublishingEnabled(enabled: Boolean) {
+        if (publishingEnabled == enabled) return
+        publishingEnabled = enabled
+        if (!enabled) resetLevels()
+        AppLog.i("VizProcessor", "viz.publishing=$enabled frames=$publishedFrames")
+    }
+
+    fun zero() = resetLevels()
+    override fun onFlush() = resetLevels()
+    override fun onReset() = resetLevels()
 
     override fun onConfigure(inputAudioFormat: androidx.media3.common.audio.AudioProcessor.AudioFormat): androidx.media3.common.audio.AudioProcessor.AudioFormat {
         channels = inputAudioFormat.channelCount.coerceAtLeast(1)
@@ -50,6 +65,10 @@ class VizProcessor : BaseAudioProcessor() {
             inputBuffer.position(inputBuffer.limit())
             return
         }
+        if (!publishingEnabled) {
+            replaceOutputBuffer(remaining).put(inputBuffer).flip()
+            return
+        }
         // 拷贝一段再读（ByteBuffer 不能随意 rewind 上游缓冲）
         val bytes = ByteArray(remaining)
         inputBuffer.get(bytes)
@@ -57,7 +76,7 @@ class VizProcessor : BaseAudioProcessor() {
             C.ENCODING_PCM_FLOAT -> 4 * channels
             else -> 2 * channels
         }
-        if (frameBytes > 0) {
+        if (publishingEnabled && frameBytes > 0) {
             val samplesPerBar = bytes.size / frameBytes / BARS
             if (samplesPerBar > 0) {
                 val out = FloatArray(BARS)
@@ -95,6 +114,7 @@ class VizProcessor : BaseAudioProcessor() {
                 if (now - lastEmit >= MIN_INTERVAL_MS) {
                     lastEmit = now
                     _levels.value = peaks.copyOf()
+                    publishedFrames++
                 }
             }
         }
@@ -105,6 +125,7 @@ class VizProcessor : BaseAudioProcessor() {
 
     /** 暂停/停止时把柱子归零。 */
     fun resetLevels() {
+        lastEmit = 0L
         for (i in peaks.indices) peaks[i] = 0f
         _levels.value = FloatArray(BARS)
     }

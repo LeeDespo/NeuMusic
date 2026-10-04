@@ -33,7 +33,7 @@ object AppLog {
     private fun write(level: String, tag: String, msg: String, t: Throwable?) {
         if (!Prefs.loggingEnabled) return
         val line = buildString {
-            append(ts.format(Date())).append(' ').append(level).append('/').append(tag).append(": ").append(msg)
+            append(synchronized(ts) { ts.format(Date()) }).append(' ').append(level).append('/').append(tag).append(": ").append(msg)
             if (t != null) append(" — ").append(t.javaClass.simpleName).append(": ").append(t.message)
         }
         android.util.Log.println(android.util.Log.INFO, tag, line)

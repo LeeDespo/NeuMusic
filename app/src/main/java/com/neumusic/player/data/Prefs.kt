@@ -252,6 +252,38 @@ object Prefs {
         get() = sp.getFloat("playPitch", 1f)
         set(v) = sp.edit().putFloat("playPitch", v).apply()
 
+    /** 音效 v2：保留旧预设键供迁移；精确引擎参数独立保存。 */
+    var eqEngine: String
+        get() = sp.getString("eqEngine", "PLATFORM") ?: "PLATFORM"
+        set(v) = sp.edit().putString("eqEngine", v).apply()
+    var eqStoreV2: String
+        get() = sp.getString("eqStoreV2", "") ?: ""
+        set(v) = sp.edit().putString("eqStoreV2", v).apply()
+    var eqPreciseBands: IntArray
+        get() = sp.getString("eqPreciseBands", null)?.split(',')?.mapNotNull { it.toIntOrNull() }?.toIntArray() ?: IntArray(10)
+        set(v) = sp.edit().putString("eqPreciseBands", v.joinToString(",")).apply()
+    var eqPreampDb: Float
+        get() = sp.getFloat("eqPreampDb", 0f)
+        set(v) = sp.edit().putFloat("eqPreampDb", v).apply()
+    var eqDvcMode: String
+        get() = sp.getString("eqDvcMode", null) ?: if (eqDvc) "medium" else "off"
+        set(v) = sp.edit().putString("eqDvcMode", v).apply()
+    var eqLimiterEnabled: Boolean
+        get() = sp.getBoolean("eqLimiterEnabled", true)
+        set(v) = sp.edit().putBoolean("eqLimiterEnabled", v).apply()
+    var eqLimiterThreshold: Float
+        get() = sp.getFloat("eqLimiterThreshold", -2f)
+        set(v) = sp.edit().putFloat("eqLimiterThreshold", v).apply()
+    var eqLimiterRelease: Float
+        get() = sp.getFloat("eqLimiterRelease", 60f)
+        set(v) = sp.edit().putFloat("eqLimiterRelease", v).apply()
+    var eqLoudness: Int
+        get() = sp.getInt("eqLoudness", 0)
+        set(v) = sp.edit().putInt("eqLoudness", v).apply()
+    var vizPermissionAsked: Boolean
+        get() = sp.getBoolean("vizPermissionAsked", false)
+        set(v) = sp.edit().putBoolean("vizPermissionAsked", v).apply()
+
     /** 智能调音：按曲目风格自动套用均衡器预设。 */
     var smartEq: Boolean
         get() = sp.getBoolean("smartEq", false)
@@ -330,13 +362,6 @@ object Prefs {
     var lightingLightMin: Float
         get() = sp.getFloat("lightingLightMin", 3.5f)
         set(v) = sp.edit().putFloat("lightingLightMin", v.coerceIn(0f, 40f)).apply()
-
-    /** ExoPlayer 的音频会话 id（PlayerHost 创建播放器后写入，供各音效挂载）。 */
-    @Volatile
-    var sessionIdForFx: Int = 0
-        set(v) {
-            field = v
-        }
 
     /** 响应式通道：初值在 [init] 时从磁盘读一次。 */
     val themeFlow = MutableStateFlow(ThemeMode.SYSTEM)

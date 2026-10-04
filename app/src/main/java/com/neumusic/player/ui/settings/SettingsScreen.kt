@@ -112,7 +112,6 @@ fun SettingsScreen(onBack: () -> Unit) {
     var showTrans by remember { mutableStateOf(Prefs.showLyricTranslation) }
     var downloadDir by remember { mutableStateOf(Prefs.downloadDir) }
     var downloadQuality by remember { mutableStateOf(Prefs.downloadQuality) }
-    var barViz by remember { mutableStateOf(Prefs.barViz) }
     var vinyl by remember { mutableStateOf(Prefs.vinylMode) }
     var logging by remember { mutableStateOf(Prefs.loggingEnabled) }
     var logMaxMbText by remember { mutableStateOf(Prefs.logMaxMb.toString()) }
@@ -553,19 +552,6 @@ fun SettingsScreen(onBack: () -> Unit) {
                     .padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                // 播放条音频可视化
-                Text(
-                    "播放栏", fontSize = 13.sp, color = colors.textSecondary,
-                    modifier = Modifier.padding(start = 6.dp),
-                )
-                ShadeSwitchRow(
-                    label = "播放条音频可视化",
-                    checked = barViz,
-                    subtitle = "在底部播放栏显示随音乐起伏的电平条。",
-                ) { barViz = it; Prefs.barViz = it }
-
-                Spacer(Modifier.height(4.dp))
-
                 // 黑胶唱片模式（用户请我取名：封面按唱片机样式呈现）
                 Text(
                     "播放页", fontSize = 13.sp, color = colors.textSecondary,

@@ -34,6 +34,8 @@ object SmartEq {
         34 to "Hip Hop", 50 to "Rock",
     )
 
+    fun defaultGenreMap(): Map<Int, String> = DEFAULT_MAP
+
     /** 默认映射 JSON（首次播种用）。 */
     fun defaultGenreMapJson(): String {
         val o = org.json.JSONObject()
@@ -51,18 +53,27 @@ object SmartEq {
 
     /** 换歌时调用：应用映射预设并更新提示。 */
     fun applyFor(track: Track) {
-        if (!EqualizerHost.available.value) return
+        if (!EqualizerHost.mounted.value) {
+            _lastApplied.value = "音效暂未挂载，保持当前调音"
+            return
+        }
         if (track.genre == 0) {
             _lastApplied.value = "本曲无风格数据，保持当前调音"
             return
         }
         val name = presetNameFor(track.genre)
-        if (name == null) {
+        if (name.isNullOrEmpty()) {
             _lastApplied.value = "风格 ${track.genre} 暂无映射，保持当前调音"
             return
         }
-        if (name != EqualizerHost.selectedPreset.value) {
-            EqualizerHost.selectPreset(name)
+        val preset = EqualizerHost.presets.value.firstOrNull { it.name == name }
+        if (preset == null) {
+            _lastApplied.value = "预设不存在：$name"
+            return
+        }
+        if (!EqualizerHost.canSelectPreset(preset) || !EqualizerHost.selectPreset(name)) {
+            _lastApplied.value = "预设不适用于当前引擎：$name"
+            return
         }
         _lastApplied.value = "智能调音：${track.name.take(12)} → $name"
     }

@@ -1,95 +1,108 @@
 package com.neumusic.player.player
 
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
 import android.media.audiofx.Visualizer
+import com.neumusic.player.data.AppLog
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 
-/**
- * 播放条可视化数据源（频谱）。
- *
- * 优先用系统 [Visualizer]（真 FFT，柱子按频段跳动）；
- * Visualizer 不可用（部分 ROM 禁用/权限缺失）时自动回退到
- * [VizProcessor] 的 PCM 分段电平（时域波形能量，观感平缓）。
- * 两者都输出 [BARS] 段 0..1 电平。
- *
- * Visualizer 需在 manifest 声明 RECORD_AUDIO（普通权限，安装即授；
- * 这是系统把该 API 挂在录音权限组下的模型要求，并不真的采集麦克风）。
- */
+/** FFT needs a granted runtime RECORD_AUDIO permission; PCM never needs it. */
 object VizHost {
     const val BARS = 16
-
-    private val _levels = MutableStateFlow(FloatArray(BARS))
-    val levels: StateFlow<FloatArray> = _levels
-
-    /** 用的是真频谱（FFT）还是回退的波形电平。 */
-    private val _usingFft = MutableStateFlow(false)
-    val usingFft: StateFlow<Boolean> = _usingFft
-
+    val levels = MutableStateFlow(FloatArray(BARS))
+    val usingFft = MutableStateFlow(false)
+    val status = MutableStateFlow("波形电平")
+    private var context: Context? = null
     private var visualizer: Visualizer? = null
     private val peaks = FloatArray(BARS)
-
-    /** 在拿到音频会话 id 后调用。 */
+    private var session = 0
+    @Volatile private var enabled = false
+    @Volatile private var playing = false
+    fun init(context: Context) { this.context = context.applicationContext }
     fun attach(sessionId: Int) {
-        if (visualizer != null) return
+        if (sessionId <= 0) { detach(); return }
+        if (session == sessionId && visualizer != null) return
+        detach()
+        session = sessionId
+        if (enabled) retryFft(sessionId)
+    }
+    fun retryFft(sessionId: Int = session): Boolean {
+        releaseVisualizer()
+        session = sessionId
+        if (!enabled || sessionId <= 0) return false
+        if (context?.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            status.value = "录音权限未授予，使用波形电平（不采集麦克风）"
+            AppLog.i("VizHost", "viz.usingFft=false permission denied")
+            return false
+        }
+        var candidate: Visualizer? = null
         runCatching {
             val v = Visualizer(sessionId)
+            candidate = v
             v.enabled = false
-            val size = Visualizer.getCaptureSizeRange()?.let { if (it.size >= 2) it[1] else 1024 } ?: 1024
-            v.captureSize = size
-            v.setDataCaptureListener(
-                object : Visualizer.OnDataCaptureListener {
-                    override fun onWaveFormDataCapture(visualizer: Visualizer?, waveform: ByteArray?, samplingRate: Int) {
-                        // 用 FFT 时不需要波形
-                    }
-
-                    override fun onFftDataCapture(visualizer: Visualizer?, fft: ByteArray?, samplingRate: Int) {
-                        if (fft == null || fft.size < 4) return
-                        val out = FloatArray(BARS)
-                        // fft 是 packed：re[0], im[0], re[1], im[1]...（8bit signed）
-                        val bins = fft.size / 2
-                        val per = bins / BARS
-                        if (per <= 0) return
-                        for (b in 0 until BARS) {
-                            var acc = 0f
-                            for (k in 0 until per) {
-                                val idx = (b * per + k) * 2
-                                if (idx + 1 < fft.size) {
-                                    val re = fft[idx].toInt()
-                                    val im = fft[idx + 1].toInt()
-                                    acc += kotlin.math.sqrt((re * re + im * im).toFloat())
-                                }
-                            }
-                            // 归一：单 bin 最大 ≈ sqrt(128²+128²)≈181，per 个取均值后缩放
-                            out[b] = ((acc / per) / 128f).coerceIn(0f, 1f)
+            v.captureSize = Visualizer.getCaptureSizeRange()[1]
+            val result = v.setDataCaptureListener(object : Visualizer.OnDataCaptureListener {
+                override fun onWaveFormDataCapture(v: Visualizer?, wave: ByteArray?, rate: Int) = Unit
+                override fun onFftDataCapture(v: Visualizer?, fft: ByteArray?, rate: Int) {
+                    if (v !== visualizer || !enabled || !playing || fft == null || fft.size < 4) return
+                    val bins = fft.size / 2
+                    val per = (bins - 1) / BARS
+                    if (per <= 0) return
+                    val out = FloatArray(BARS)
+                    for (bar in 0 until BARS) {
+                        var acc = 0f
+                        // Packed FFT indices 0/1 contain DC/Nyquist, not a complex pair.
+                        for (k in 0 until per) {
+                            val i = (1 + bar * per + k) * 2
+                            val re = fft[i].toInt(); val im = fft[i + 1].toInt()
+                            acc += kotlin.math.sqrt((re * re + im * im).toFloat())
                         }
-                        publish(out)
+                        out[bar] = (acc / per / 128f).coerceIn(0f, 1f)
                     }
-                },
-                Visualizer.getMaxCaptureRate(),
-                true,   // waveform
-                true,   // fft
-            )
-            v.enabled = true
+                    synchronized(peaks) {
+                        if (!enabled || !playing || v !== visualizer) return
+                        for (i in peaks.indices) peaks[i] = maxOf(out[i], peaks[i] * .72f + out[i] * .28f)
+                        levels.value = peaks.copyOf()
+                    }
+                }
+            }, Visualizer.getMaxCaptureRate() / 2, false, true)
+            check(result == Visualizer.SUCCESS) { "capture listener error=$result" }
             visualizer = v
-            _usingFft.value = true
+            v.enabled = playing
+            usingFft.value = true
+            status.value = "系统 FFT"
         }.onFailure {
-            // 回退：VizProcessor 的分段电平已在管线里跑着
-            _usingFft.value = false
-            android.util.Log.i("VizHost", "Visualizer unavailable, fallback to PCM levels: $it")
+            runCatching { candidate?.release() }
+            visualizer = null
+            usingFft.value = false
+            status.value = "本机 FFT 不可用，已回退波形电平"
+            AppLog.w("VizHost", "FFT unavailable session=$sessionId", it)
         }
+        AppLog.i("VizHost", "viz.usingFft=${usingFft.value} status=${status.value}")
+        return usingFft.value
     }
-
-    private fun publish(frame: FloatArray) {
-        for (b in 0 until BARS) {
-            // 快升慢降的峰值保持，观感跳跃又不过分抖
-            peaks[b] = if (frame[b] > peaks[b]) frame[b] else peaks[b] * 0.72f + frame[b] * 0.28f
-        }
-        _levels.value = peaks.copyOf()
+    fun setEnabled(value: Boolean) {
+        enabled = value
+        if (!value) { releaseVisualizer(); zero(); status.value = "已关闭" }
+        else if (visualizer == null) retryFft()
     }
-
-    /** 停止时归零（暂停）。 */
-    fun decay() {
-        for (b in 0 until BARS) peaks[b] *= 0.5f
-        _levels.value = peaks.copyOf()
+    fun setPlaying(value: Boolean) {
+        playing = value
+        runCatching { visualizer?.enabled = enabled && value }
+            .onFailure { releaseVisualizer(); status.value = "FFT 停止，已回退波形电平" }
+        if (!value) zero()
     }
+    fun zero() = synchronized(peaks) { peaks.fill(0f); levels.value = FloatArray(BARS) }
+    fun decay() = zero()
+    private fun releaseVisualizer() {
+        val old = visualizer
+        visualizer = null
+        runCatching { old?.enabled = false }
+        runCatching { old?.release() }
+        usingFft.value = false
+        zero()
+    }
+    fun detach() { releaseVisualizer(); session = 0 }
+    fun release() = detach()
 }

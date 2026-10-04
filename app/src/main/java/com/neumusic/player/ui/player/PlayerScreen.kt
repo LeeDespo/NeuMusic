@@ -612,10 +612,10 @@ private fun CoverDisc(
     val animatedFrac by animateFloatAsState(frac, tween(160), label = "ringFrac")
     val ringMaxLen = RING_MAX_LEN
     // 电平流在此订阅（而不是页面顶层）：高频重组被隔离在圆盘子树内
-    val usingFft by VizHost.usingFft.collectAsState()
-    val fftLevels by VizHost.levels.collectAsState()
-    val pcmLevels by PlayerHost.vizProcessor.levels.collectAsState()
-    val levels = if (usingFft) fftLevels else pcmLevels
+    val vizOn by Prefs.barVizFlow.collectAsState()
+    val usingFft = VizHost.usingFft.collectAsState()
+    val fftLevels = VizHost.levels.collectAsState()
+    val pcmLevels = PlayerHost.vizProcessor.levels.collectAsState()
 
     // 自转已随黑胶模式一并搬到 VinylTurntable（2026-10-03 移植）：
     // CoverDisc 现在只画**非黑胶**的普通圆盘 —— 用户规格「关闭黑胶就是不转的普通圆盘」，
@@ -627,7 +627,8 @@ private fun CoverDisc(
     ) {
         // 频谱环：围绕圆盘的径向电平柱（与播放栏封面的可视化同款、同频段数）。
         // 电平源只有 VizHost.BARS(16) 段，这里按 VIZ_BARS(40) 根铺开（降采样映射）。
-        Canvas(Modifier.fillMaxSize()) {
+        if (vizOn) Canvas(Modifier.fillMaxSize()) {
+            val levels = if (usingFft.value) fftLevels.value else pcmLevels.value
             val gap = RING_GAP.toPx()
             val discRadius = DISC_SIZE.toPx() / 2f
             val innerR = discRadius + gap

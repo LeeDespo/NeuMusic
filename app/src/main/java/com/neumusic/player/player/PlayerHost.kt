@@ -6,6 +6,9 @@ import android.os.Looper
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import androidx.media3.exoplayer.PlayerMessage
+import com.neumusic.player.player.eq.EqProcessor
+import com.neumusic.player.data.AppLog
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.audio.DefaultAudioSink
@@ -21,7 +24,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * 全局播放器宿主：ExoPlayer 单例 + 播放队列 / 模式 / 喜欢状态。
@@ -33,7 +38,19 @@ object PlayerHost {
     private val main = Handler(Looper.getMainLooper())
 
     /** 播放条可视化的 PCM 数据源（透传处理器，免 RECORD_AUDIO 权限）。 */
-    val vizProcessor = VizProcessor()
+    private val pcmLevels = MutableStateFlow(FloatArray(VizProcessor.BARS))
+    var vizProcessor = VizProcessor(pcmLevels)
+        private set
+    var eqProcessor = EqProcessor()
+        private set
+    private val fxScope = CoroutineScope(Dispatchers.Main + kotlinx.coroutines.SupervisorJob())
+    private var vizJob: kotlinx.coroutines.Job? = null
+    private var initializing = false
+    private val playbackGeneration = AtomicLong(0)
+    private val lifecycleGeneration = AtomicLong(0)
+    private var resolveJob: Job? = null
+    private var lyricsJob: Job? = null
+
 
     private val _current = MutableStateFlow<Track?>(null)
     val current: StateFlow<Track?> = _current
@@ -70,6 +87,7 @@ object PlayerHost {
     private val listener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             _isPlaying.value = isPlaying
+            AudioFxController.setPlaying(isPlaying)
             // 播放中必须有一个 mediaPlayback 类型的前台服务，否则系统会在后台
             // 直接把进程回收（真机实测：后台播放一两分钟自动停）。暂停后不主动停，
             // 由 MediaSessionService 自己按空闲规则收尾。
@@ -79,6 +97,15 @@ object PlayerHost {
             } else if (t != null) {
                 PlaybackService.stop(requireNotNull(appContext))
             }
+        }
+
+        override fun onAudioSessionIdChanged(audioSessionId: Int) {
+            AudioFxController.attach(audioSessionId)
+        }
+
+        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+            AppLog.w("PlayerHost", "playback error code=${error.errorCode}", error)
+            onError?.invoke("播放失败，请重试")
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
@@ -98,8 +125,26 @@ object PlayerHost {
 
     fun init(context: Context) {
         appContext = context.applicationContext
-        if (player != null) return
+        if (player != null || initializing) return
+        initializing = true
+        val generation = lifecycleGeneration.get()
         main.post {
+            if (generation != lifecycleGeneration.get()) {
+                initializing = false
+                return@post
+            }
+            // AudioProcessor buffers belong to one sink lifetime. Publish to a stable UI flow.
+            vizProcessor = VizProcessor(pcmLevels)
+            eqProcessor = EqProcessor()
+            val sessionViz = vizProcessor
+            val sessionEq = eqProcessor
+            AudioFxController.onPcmStateChanged = { enabled, playing ->
+                player?.createMessage(PlayerMessage.Target { _, _ ->
+                    sessionViz.setPublishingEnabled(enabled && playing)
+                })?.send()
+            }
+            AudioFxController.init(context.applicationContext, vizProcessor)
+            EqualizerHost.onProcessingChanged = { refreshEqProcessing() }
             val renderersFactory = object : DefaultRenderersFactory(context.applicationContext) {
                 override fun buildAudioSink(
                     context: Context,
@@ -107,9 +152,9 @@ object PlayerHost {
                     enableAudioTrackPlaybackParams: Boolean,
                 ): AudioSink {
                     return DefaultAudioSink.Builder(context)
-                        .setEnableFloatOutput(enableFloatOutput)
+                        .setEnableFloatOutput(false)
                         .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
-                        .setAudioProcessors(arrayOf(vizProcessor))
+                        .setAudioProcessors(arrayOf(sessionEq, sessionViz))
                         .build()
                 }
             }
@@ -129,22 +174,60 @@ object PlayerHost {
                         .build()
                 }
                 it.repeatMode = repeatOf(Prefs.playMode)
-                // 均衡器/动态处理挂到播放器的音频会话上（设备不支持时静默降级）。
-                runCatching {
-                    var sid = it.audioSessionId
-                    if (sid == 0) {
-                        val am = context.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
-                        sid = am.generateAudioSessionId()
-                        it.setAudioSessionId(sid)
-                    }
-                    Prefs.sessionIdForFx = sid
-                    EqualizerHost.attach(sid)
-                    DynamicsFxHost.attach(sid)
-                    VizHost.attach(sid)
-                    applyPlaybackParams()
-                }
+                AudioFxController.attach(it.audioSessionId)
+                applyPlaybackParams()
+
+            }
+            initializing = false
+            refreshEqProcessing()
+            vizJob?.cancel()
+            vizJob = fxScope.launch {
+                Prefs.barVizFlow.collect { AudioFxController.setVisualizationEnabled(it) }
             }
         }
+    }
+
+    private fun refreshEqProcessing() {
+        val snapshot = EqualizerHost.processingSnapshot()
+        main.post {
+            val processor = eqProcessor
+            player?.createMessage(PlayerMessage.Target { _, _ ->
+                processor.setSnapshot(snapshot)
+            })?.send()
+        }
+    }
+
+    /** 显式停止并释放；暂停/通知服务退出不销毁播放器。 */
+    fun release() {
+        val generation = playbackGeneration.incrementAndGet()
+        lifecycleGeneration.incrementAndGet()
+        val teardown = Runnable {
+            if (playbackGeneration.get() == generation) {
+                resolveJob?.cancel(); resolveJob = null
+                lyricsJob?.cancel(); lyricsJob = null
+            }
+            initializing = false
+            EqualizerHost.commitBands()
+            EqualizerHost.commitBass()
+            DynamicsFxHost.commitBalance()
+            LoudnessHost.commitGain()
+            commitPlaybackParams()
+            vizJob?.cancel(); vizJob = null
+            val old = player
+            player = null
+            old?.removeListener(listener)
+            mediaSession?.release(); mediaSession = null
+            old?.release()
+            AudioFxController.releaseAll()
+            _isPlaying.value = false
+            _current.value = null
+            _lyrics.value = null
+            queue = emptyList(); index = -1
+            playedHistory.clear(); pendingNext.clear()
+            appContext?.let { PlaybackService.stop(it) }
+        }
+        // UI/service callers are already on Main: finish teardown before a new play request.
+        if (Looper.myLooper() == main.looper) teardown.run() else main.post(teardown)
     }
 
     var playMode: PlayMode
@@ -165,6 +248,7 @@ object PlayerHost {
     /** 设置队列并从第 [startAt] 首开始播放。 */
     fun playQueue(tracks: List<Track>, startAt: Int, onError: (String) -> Unit = {}) {
         if (tracks.isEmpty()) return
+        appContext?.let { init(it) }
         queue = tracks
         index = startAt.coerceIn(0, tracks.size - 1)
         playedHistory.clear()
@@ -174,30 +258,36 @@ object PlayerHost {
 
     private fun playCurrent(onError: (String) -> Unit) {
         val track = queue.getOrNull(index) ?: return
+        val generation = playbackGeneration.incrementAndGet()
+        resolveJob?.cancel()
+        lyricsJob?.cancel()
         _current.value = track
         _liked.value = false
         _lyrics.value = null
         val resolver = resolveUrl ?: run { onError("播放器未就绪"); return }
-        CoroutineScope(Dispatchers.Main).launch {
+        resolveJob = fxScope.launch {
             val result = runCatching { resolver(track) }
+            if (generation != playbackGeneration.get()) return@launch
             val url = result.getOrNull()
             if (url == null) {
                 // 异常 message 已是人话（VIP 权限/限流/网络），直接透传。
                 onError(result.exceptionOrNull()?.message ?: "拿不到播放链接（可能限流，请重试）")
-            } else startInternal(track, url, onError)
+            } else startInternal(track, url, onError, generation)
         }
         // 歌词与播放链接并行拉取，互不阻塞。
-        CoroutineScope(Dispatchers.Main).launch {
-            _lyrics.value = runCatching { LyricApi.lyricsFor(track.mid) }.getOrNull()
+        lyricsJob = fxScope.launch {
+            val lyrics = runCatching { LyricApi.lyricsFor(track.mid) }.getOrNull()
+            if (generation == playbackGeneration.get()) _lyrics.value = lyrics
         }
         // 智能调音：开启时按曲目风格自动套用对应预设（无映射/未知风格保持现状）。
-        CoroutineScope(Dispatchers.Main).launch {
-            if (Prefs.smartEq) SmartEq.applyFor(track)
-        }
+        if (Prefs.smartEq && generation == playbackGeneration.get()) SmartEq.applyFor(track)
     }
 
-    private fun startInternal(track: Track, url: String, onError: (String) -> Unit) {
+    private fun startInternal(track: Track, url: String, onError: (String) -> Unit, generation: Long) {
+        if (generation != playbackGeneration.get()) return
+        appContext?.let { init(it) }
         main.post {
+            if (generation != playbackGeneration.get()) return@post
             val p = player ?: return@post
             try {
                 // 带上元数据：前台服务的媒体通知 / 锁屏控件靠它显示歌名歌手封面
@@ -351,21 +441,35 @@ object PlayerHost {
     private val _pitch = MutableStateFlow(Prefs.playPitch)
     val pitch: StateFlow<Float> = _pitch
 
-    /** 同时改速度与音调（范围 0.5..2.0），并持久化。 */
-    fun setPlaybackParams(speed: Float, pitch: Float) {
-        val sp = speed.coerceIn(0.5f, 2f)
-        val pt = pitch.coerceIn(0.5f, 2f)
-        Prefs.playSpeed = sp
-        Prefs.playPitch = pt
-        _speed.value = sp
-        _pitch.value = pt
+    private var pendingSpeed: Float? = null
+    private var pendingPitch: Float? = null
+
+    /** 预览只实时下发，手势结束再提交。 */
+    fun previewPlaybackParams(speed: Float? = null, pitch: Float? = null) {
+        speed?.let { pendingSpeed = it.coerceIn(0.5f, 2f) }
+        pitch?.let { pendingPitch = it.coerceIn(0.5f, 2f) }
         applyPlaybackParams()
     }
 
-    private fun applyPlaybackParams() {
-        main.post {
-            player?.playbackParameters = PlaybackParameters(Prefs.playSpeed, Prefs.playPitch)
+    fun commitPlaybackParams() {
+        val sp = pendingSpeed ?: _speed.value
+        val pt = pendingPitch ?: _pitch.value
+        if (sp != _speed.value || pt != _pitch.value) {
+            Prefs.playSpeed = sp; Prefs.playPitch = pt
+            _speed.value = sp; _pitch.value = pt
+            AppLog.i("AudioFx", "playParams.commit speed=$sp pitch=$pt")
         }
+        pendingSpeed = null; pendingPitch = null
+    }
+
+    fun setPlaybackParams(speed: Float, pitch: Float) {
+        previewPlaybackParams(speed, pitch)
+        commitPlaybackParams()
+    }
+
+    private fun applyPlaybackParams() {
+        val params = PlaybackParameters(pendingSpeed ?: _speed.value, pendingPitch ?: _pitch.value)
+        main.post { player?.playbackParameters = params }
     }
 
     fun seekTo(ms: Long) {

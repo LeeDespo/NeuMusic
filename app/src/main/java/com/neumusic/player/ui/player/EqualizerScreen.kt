@@ -1,556 +1,486 @@
 package com.neumusic.player.ui.player
 
-import androidx.compose.animation.animateColorAsState
+import android.Manifest
+import android.content.pm.PackageManager
+import android.provider.OpenableColumns
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.draw.alpha
+import androidx.compose.foundation.lazy.items
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.*
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.neumusic.player.data.Prefs
-import com.neumusic.player.player.DynamicsFxHost
-import com.neumusic.player.player.EqualizerHost
+import androidx.core.content.ContextCompat
+import com.neumusic.player.data.*
+import com.neumusic.player.player.*
 import com.neumusic.player.player.EqualizerHost.EqPreset
-import com.neumusic.player.player.PlayerHost
-import com.neumusic.player.player.SmartEq
-import com.neumusic.player.shade.LocalShadeColors
-import com.neumusic.player.shade.shadeInset
-import com.neumusic.player.shade.shadeSurface
-import com.neumusic.player.ui.common.ShadeDialog
-import com.neumusic.player.ui.common.ShadeDialogRow
-import com.neumusic.player.ui.common.toastMain
-import com.neumusic.player.ui.common.HorizontalShadeSlider
-import com.neumusic.player.ui.common.rememberPlayerBarSpace
-import com.neumusic.player.ui.common.TopEdgeFade
-import com.neumusic.player.ui.common.ShadeSwitch
+import com.neumusic.player.shade.*
+import com.neumusic.player.ui.common.*
 import com.neumusic.player.ui.home.DetailTopBar
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
-/**
- * 音效页（播放页顶栏「均衡器」进入）。
- *
- * 结构：开关 → 预设（全部可改 + 新增/删除）→ 频段滑杆 → 低音增强 → DVC/声道平衡 →
- * 速度与音调 → 智能调音（每个曲风可挑任意预设）。
- */
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+/** 三个分区共用滚动页头；各项根据自身能力启停，速度/音调始终可用。 */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun EqualizerScreen(onBack: () -> Unit) {
     val colors = LocalShadeColors.current
-    val barSpace = rememberPlayerBarSpace()
     val ctx = LocalContext.current
-
-    if (!EqualizerHost.available.collectAsState().value) {
-        Column(Modifier.fillMaxSize().background(colors.background).statusBarsPadding()) {
-            DetailTopBar("音效", onBack)
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("此设备不支持均衡器", color = colors.textTertiary, fontSize = 14.sp)
-            }
-        }
-        return
-    }
-
+    val scope = rememberCoroutineScope()
+    val barSpace = rememberPlayerBarSpace()
+    var tab by rememberSaveable { mutableIntStateOf(0) }
+    val scroll = rememberScrollState()
+    val engine by EqualizerHost.engine.collectAsState()
     val enabled by EqualizerHost.enabled.collectAsState()
-    val dynamicsAvailable by DynamicsFxHost.available.collectAsState()
-    val dvc by DynamicsFxHost.dvc.collectAsState()
-    val balance by DynamicsFxHost.balance.collectAsState()
-    val speed by PlayerHost.speed.collectAsState()
-    val pitch by PlayerHost.pitch.collectAsState()
-    var smartEq by remember { mutableStateOf(Prefs.smartEq) }
-    val lastApplied by SmartEq.lastApplied.collectAsState()
+    val mounted by EqualizerHost.mounted.collectAsState()
+    val available by EqualizerHost.available.collectAsState()
+    val control by EqualizerHost.hasControl.collectAsState()
     val bands by EqualizerHost.bands.collectAsState()
     val presets by EqualizerHost.presets.collectAsState()
-    val selectedPreset by EqualizerHost.selectedPreset.collectAsState()
-    var genreMapVersion by remember { mutableStateOf(0) }
+    val selected by EqualizerHost.selectedPreset.collectAsState()
     val bass by EqualizerHost.bass.collectAsState()
-    val freqs = remember { EqualizerHost.bandFreqs }
-
-    // 弹窗状态
-    var showAddDialog by remember { mutableStateOf(false) }
-    var deleteTarget by remember { mutableStateOf<EqPreset?>(null) }
-    var genrePick by remember { mutableStateOf<Pair<Int, String>?>(null) }   // 曲风码 → 中文名
-
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(colors.background)
-            // 不在这里加 statusBarsPadding：那会把整页（含顶部渐隐线）往下推一整个状态栏，
-            // 渐隐线就比别的页低。状态栏内缩由顶栏（DetailTopBar）自己负责。
-            .navigationBarsPadding(),
-    ) {
-        // 顶栏随页面滚动（用户规定）：放进滚动列第一项
-        val eqScroll = rememberScrollState()
-        Box(Modifier.fillMaxSize()) {
-        Column(
-            Modifier.fillMaxSize().verticalScroll(eqScroll),
-        ) {
+    val bassAvailable by EqualizerHost.bassAvailable.collectAsState()
+    val bassControl by EqualizerHost.bassHasControl.collectAsState()
+    val bassAdjustable by EqualizerHost.bassStrengthSupported.collectAsState()
+    val actualEqEnabled by EqualizerHost.actualEnabled.collectAsState()
+    val generation by EqualizerHost.editGeneration.collectAsState()
+    val approximation by EqualizerHost.approximation.collectAsState()
+    val dynamicsAvailable by DynamicsFxHost.available.collectAsState()
+    val dynamicsMounted by DynamicsFxHost.mounted.collectAsState()
+    val dynamicsControl by DynamicsFxHost.hasControl.collectAsState()
+    val dvcMode by DynamicsFxHost.dvcMode.collectAsState()
+    val balance by DynamicsFxHost.balance.collectAsState()
+    val limiter by DynamicsFxHost.limiterEnabled.collectAsState()
+    val threshold by DynamicsFxHost.limiterThreshold.collectAsState()
+    val release by DynamicsFxHost.limiterRelease.collectAsState()
+    val loudnessAvailable by LoudnessHost.available.collectAsState()
+    val loudnessMounted by LoudnessHost.mounted.collectAsState()
+    val loudnessControl by LoudnessHost.hasControl.collectAsState()
+    val loudness by LoudnessHost.gain.collectAsState()
+    val speed by PlayerHost.speed.collectAsState()
+    val pitch by PlayerHost.pitch.collectAsState()
+    val vizOn by Prefs.barVizFlow.collectAsState()
+    val fft by VizHost.usingFft.collectAsState()
+    val sid by AudioFxController.sessionId.collectAsState()
+    var smartEq by remember { mutableStateOf(Prefs.smartEq) }
+    val lastApplied by SmartEq.lastApplied.collectAsState()
+    var mapVersion by remember { mutableIntStateOf(0) }
+    var add by remember { mutableStateOf(false) }
+    var delete by remember { mutableStateOf<EqPreset?>(null) }
+    var genrePick by remember { mutableStateOf<Pair<Int, String>?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    var autoEqOpen by remember { mutableStateOf(false) }
+    var exportText by remember { mutableStateOf("") }
+    val curve = remember { mutableStateOf(EqualizerHost.curveSnapshot()) }
+    LaunchedEffect(bands, engine, selected, bass, enabled, mounted) { curve.value = EqualizerHost.curveSnapshot() }
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) AudioFxController.retryFft()
+    }
+    fun switchViz(on: Boolean) {
+        Prefs.barViz = on
+        AudioFxController.setVisualizationEnabled(on)
+        if (on && ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED && !Prefs.vizPermissionAsked) {
+            Prefs.vizPermissionAsked = true
+            permission.launch(Manifest.permission.RECORD_AUDIO)
+        } else if (on) AudioFxController.retryFft()
+    }
+    val importFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch {
+            busy = true
+            val result = runCatching {
+                val pair = withContext(Dispatchers.IO) {
+                    val name = ctx.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                        if (c.moveToFirst()) c.getString(0) else null
+                    } ?: "导入预设"
+                    val text = ctx.contentResolver.openInputStream(uri)?.use {
+                        val bytes = readPresetBytes(it)
+                        require(bytes.size <= 256 * 1024) { "预设文件超过 256 KB" }
+                        bytes.toString(Charsets.UTF_8)
+                    } ?: error("无法读取文件")
+                    name.substringBeforeLast('.') to text
+                }
+                EqualizerHost.importPreset(pair.first, pair.second)
+            }
+            toastMain(ctx, result.fold({ importMessage(it) }, { it.message ?: "导入失败" }))
+            busy = false
+        }
+    }
+    val exportFile = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
+        if (uri != null) scope.launch {
+            val text = exportText
+            val result = withContext(Dispatchers.IO) { runCatching {
+                val out = ctx.contentResolver.openOutputStream(uri) ?: error("无法写入文件")
+                out.use { it.write(text.toByteArray(Charsets.UTF_8)) }
+            } }
+            toastMain(ctx, if (result.isSuccess) "已导出预设" else result.exceptionOrNull()?.message ?: "导出失败")
+        }
+    }
+    val precise = engine.name == "PRECISE"
+    val eqReady = mounted && (precise || (available && control))
+    val dynReady = dynamicsAvailable && dynamicsMounted && dynamicsControl
+    Box(Modifier.fillMaxSize().background(colors.background).navigationBarsPadding()) {
+        Column(Modifier.fillMaxSize().verticalScroll(scroll)) {
             DetailTopBar("音效", onBack, horizontalPadding = 16.dp)
-            // ── 开关 ──
-            Column(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp)
-                    .shadeSurface(cornerRadius = 24.dp, offset = 6.dp, blur = 10.dp).padding(12.dp),
-            ) {
-                ToggleRow("启用均衡器", enabled) { EqualizerHost.setEnabled(!enabled) }
-            }
-            Spacer(Modifier.height(18.dp))
-
-            // ── 预设：全部可改；长按自建预设删除；「新增」以当前频段值入库 ──
-            SectionCard(title = "预设") {
-                androidx.compose.foundation.layout.FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    presets.forEach { p ->
-                        val selected = selectedPreset == p.name
-                        Text(
-                            p.name,
-                            fontSize = 13.sp,
-                            color = if (selected) colors.accent else colors.textPrimary,
-                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                            modifier = Modifier
-                                .then(
-                                    if (selected) Modifier.shadeInset(cornerRadius = 14.dp, offset = 3.dp, blur = 4.dp)
-                                    else Modifier
-                                )
-                                .pointerInput(p.name, p.builtin) {
-                                    detectTapGestures(
-                                        onTap = { EqualizerHost.selectPreset(p.name) },
-                                        onLongPress = { if (!p.builtin) deleteTarget = p },
-                                    )
+            SegmentedControl(listOf("均衡", "动态", "其它"), tab, { tab = it },
+                Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+            AnimatedContent(tab, transitionSpec = { fadeIn(tween(170)) togetherWith fadeOut(tween(120)) }, label = "fxTab") { section ->
+                Column(verticalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.padding(top = 10.dp)) {
+                    when (section) {
+                        0 -> {
+                            SectionCard("均衡引擎") {
+                                ToggleRow("启用均衡器", enabled, eqReady) { EqualizerHost.setEnabled(it) }
+                                SegmentedControl(listOf("系统", "精确"), if (precise) 1 else 0,
+                                    { EqualizerHost.setEngine(EqualizerHost.EqEngine.entries[it]) }, Modifier.padding(vertical = 8.dp))
+                                Help(if (precise) "10 段均衡 · 参数滤波器 · 自动前级与峰值保护" else "频段与精度由设备决定；参数预设在系统引擎中近似转换。")
+                                if (!eqReady) Help(when {
+                                    !precise && sid > 0 && !available -> "此设备不支持系统均衡器，可切换精确引擎。"
+                                    !mounted -> "暂未挂载，播放器就绪后可用。"
+                                    else -> "系统均衡器已被其他应用接管。"
+                                })
+                            }
+                            SectionCard("预设") {
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    presets.forEach { p ->
+                                        val selectable = eqReady && EqualizerHost.canSelectPreset(p)
+                                        Text(p.name, color = if (!selectable) colors.textTertiary else if (selected == p.name) colors.accent else colors.textPrimary,
+                                            fontSize = 13.sp, modifier = Modifier
+                                                .then(if (selected == p.name) Modifier.shadeInset(14.dp, 3.dp, 4.dp) else Modifier)
+                                                .semantics { this.selected = selected == p.name; if (!selectable) disabled() }
+                                                .pointerInput(p.name, selectable, selected) {
+                                                    detectTapGestures(onTap = {
+                                                        if (selectable && !EqualizerHost.selectPreset(p.name)) toastMain(ctx, "此预设不适用于当前引擎")
+                                                    }, onLongPress = { if (!p.builtin) delete = p })
+                                                }.padding(horizontal = 12.dp, vertical = 14.dp))
+                                    }
+                                    FlatAction("＋ 新预设", eqReady) { add = true }
                                 }
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                        )
-                    }
-                    // 新增预设（以当前滑杆值为初始值）
-                    Text(
-                        "＋ 新预设",
-                        fontSize = 13.sp,
-                        color = colors.accent,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier
-                            .flatTap { showAddDialog = true }
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                    )
-                }
-                Text(
-                    "选中预设后拖动频段会直接改这个预设；长按自建预设可删除。",
-                    fontSize = 11.sp, color = colors.textTertiary,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                )
-            }
-            Spacer(Modifier.height(18.dp))
-
-            // ── 频段滑杆（竖直，凹陷轨道 + accent 填充）──
-            SectionCard(title = "频段") {
-                if (bands.isEmpty()) {
-                    Text("暂不可用", color = colors.textTertiary, fontSize = 13.sp, modifier = Modifier.padding(8.dp))
-                } else {
-                    Row(
-                        Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                    ) {
-                        bands.indices.forEach { i ->
-                            VerticalBandSlider(
-                                label = freqLabel(freqs.getOrNull(i) ?: 0),
-                                progress = EqualizerHost.bandProgress(i),
-                                onProgress = { EqualizerHost.setBandProgress(i, it) },
-                                enabled = enabled,
-                            )
+                                Help("拖动会修改选中的预设；长按自建预设可删除。灰色预设仍可保留和导出。")
+                                approximation?.let { Help(it) }
+                                presets.firstOrNull { it.name == selected }?.source?.takeIf { it.startsWith("autoeq:") }?.let { Help("来源：${it.removePrefix("autoeq:")}") }
+                            }
+                            SectionCard("响应曲线") {
+                                EqCurveView(curve, precise)
+                                if (!enabled) Help("均衡器已关闭，曲线显示保存的设置。")
+                                Help(if (precise) "显示滤波器及自动前级后的响应；实际采样率会影响最高频段。" else "系统响应为估算，厂商实现可能不同。")
+                            }
+                            SectionCard("频段") {
+                                if (EqualizerHost.activeParametric) Help("当前使用参数滤波器；拖动频段将转换成 10 段近似曲线并修改此预设。")
+                                if (bands.isEmpty()) Help("此引擎暂未提供频段。") else {
+                                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        bands.indices.forEach { i ->
+                                            VerticalBandSlider(freqLabel(EqualizerHost.bandFreqs.getOrElse(i) { 0 }), EqualizerHost.bandProgress(i),
+                                                EqualizerHost.bandLevelRange, eqReady && enabled, generation,
+                                                onProgress = { EqualizerHost.setBandProgress(i, it, generation); curve.value = EqualizerHost.curveSnapshot() },
+                                                onCommit = { EqualizerHost.commitBands(generation) })
+                                        }
+                                    }
+                                    FlatAction("归零", eqReady && enabled) {
+                                        bands.indices.forEach { EqualizerHost.setBandProgress(it, .5f) }
+                                        EqualizerHost.commitBands(); curve.value = EqualizerHost.curveSnapshot()
+                                    }
+                                }
+                            }
+                            SectionCard("预设交换与耳机补偿") {
+                                FlatAction(if (busy) "导入中…" else "导入 EqualizerAPO / GraphicEQ", !busy) { importFile.launch(arrayOf("text/plain", "application/octet-stream")) }
+                                FlatAction("导出选中预设 / 当前曲线") {
+                                    runCatching { EqualizerHost.exportPreset(selected) ?: error("无可导出的预设") }.onSuccess {
+                                        exportText = it; exportFile.launch("${selected ?: "NeuMusic"}.txt")
+                                    }.onFailure { toastMain(ctx, it.message ?: "无法导出") }
+                                }
+                                FlatAction("搜索耳机补偿 · AutoEq") { autoEqOpen = true }
+                                Help("耳机补偿来自 AutoEq 测量结果，按型号选择；导入后可在精确引擎完整使用。")
+                            }
+                        }
+                        1 -> {
+                            SectionCard("动态范围压缩 · DVC") {
+                                if (!dynReady) Help(if (!dynamicsAvailable) "此设备不支持动态处理。" else "动态处理暂未挂载或已被其他应用接管。")
+                                Row(Modifier.horizontalScroll(rememberScrollState())) {
+                                    SegmentedControl(listOf("关", "轻", "中", "强", "夜间"), listOf("off", "light", "medium", "strong", "night").indexOf(dvcMode).coerceAtLeast(0),
+                                        { if (dynReady) DynamicsFxHost.setDvcMode(listOf("off", "light", "medium", "strong", "night")[it]) }, Modifier.alphaDisabled(!dynReady))
+                                }
+                                Help("压低安静段与高潮的响度差；强档会更明显改变动态。")
+                            }
+                            SectionCard("限幅保护") {
+                                ToggleRow("系统限幅", limiter, dynReady) { DynamicsFxHost.setLimiterEnabled(it) }
+                                ValueSlider("阈值", threshold, -6f..-.1f, dynReady && limiter, { "%.1f dB".format(it) },
+                                    { DynamicsFxHost.previewLimiterThreshold(it) }, { DynamicsFxHost.commitLimiterThreshold() })
+                                ValueSlider("释放", release, 1.5f..500f, dynReady && limiter, { "%.0f ms".format(it) },
+                                    { DynamicsFxHost.previewLimiterRelease(it) }, { DynamicsFxHost.commitLimiterRelease() })
+                                Help("精确均衡另有内部峰值保护，先限幅再输出音频。")
+                            }
+                            SectionCard("声道平衡") {
+                                ValueSlider("左 ← 居中 → 右", balance.toFloat(), -100f..100f, dynReady, {
+                                    when { it.toInt() == 0 -> "居中"; it < 0 -> "偏左 ${-it.toInt()}%"; else -> "偏右 ${it.toInt()}%" }
+                                }, { DynamicsFxHost.previewBalance(it.toInt()) }, { DynamicsFxHost.commitBalance() })
+                                FlatAction("居中", dynReady) { DynamicsFxHost.commitBalance(0) }
+                            }
+                            SectionCard("低音增强") {
+                                if (bassAvailable && bassAdjustable) ValueSlider("强度", bass.toFloat(), 0f..1000f, eqReady && enabled && bassControl, { "${(it / 10).toInt()}%" },
+                                    { EqualizerHost.setBass(it / 1000f) }, { EqualizerHost.commitBass() })
+                                else if (bassAvailable) {
+                                    ToggleRow("固定强度低音", bass > 0, eqReady && enabled && bassControl) {
+                                        EqualizerHost.setBass(if (it) 1f else 0f); EqualizerHost.commitBass()
+                                    }
+                                    Help("设备只支持固定强度。")
+                                } else Help("此设备暂不支持低音增强。")
+                            }
+                            SectionCard("响度增强") {
+                                ValueSlider("增益", loudness / 100f, 0f..9f, loudnessAvailable && loudnessMounted && loudnessControl, { "+%.1f dB".format(it) },
+                                    { LoudnessHost.previewGain((it * 100).toInt()) }, { LoudnessHost.commitGain() })
+                                Help(if (loudnessAvailable) "提升响度并压缩峰值；与 DVC 叠加时建议使用低档。" else "此设备暂不支持响度增强。")
+                            }
+                        }
+                        else -> {
+                            SectionCard("速度与音调") {
+                                ValueSlider("速度", speed, .5f..2f, true, { "×%.2f".format(it) },
+                                    { PlayerHost.previewPlaybackParams(speed = it) }, { PlayerHost.commitPlaybackParams() })
+                                ValueSlider("音调", pitch, .5f..2f, true, { "×%.2f".format(it) },
+                                    { PlayerHost.previewPlaybackParams(pitch = it) }, { PlayerHost.commitPlaybackParams() })
+                                FlatAction("重置速度与音调") { PlayerHost.setPlaybackParams(1f, 1f) }
+                            }
+                            SectionCard("智能调音") {
+                                ToggleRow("按曲目风格自动选预设", smartEq) { Prefs.smartEq = it; smartEq = it }
+                                Help(lastApplied ?: "换歌时按下面的映射套用预设。")
+                                key(mapVersion, presets) {
+                                    FlowRow {
+                                        SmartEq.GENRES.forEach { (code, label) ->
+                                            FlatAction("$label · ${EqualizerHost.genreMap()[code]?.takeIf { it.isNotBlank() } ?: "未映射"}") { genrePick = code to label }
+                                        }
+                                    }
+                                }
+                            }
+                            SectionCard("音频可视化") {
+                                ToggleRow("播放栏与播放页可视化", vizOn) { switchViz(it) }
+                                Help(when {
+                                    !vizOn -> "关闭后停止电平采样与发布。"
+                                    fft -> "系统 FFT 频谱"
+                                    ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED -> "录音权限未授予，使用波形电平；不采集麦克风。"
+                                    else -> "系统 Visualizer 不可用，使用波形电平。"
+                                })
+                            }
+                            SectionCard("空间音频") {
+                                val info by SpatialInfo.state.collectAsState()
+                                Help(if (!info.supported) "当前系统不提供空间音频状态。" else
+                                    "${if (info.available) "输出设备可用" else "输出设备不可用"} · ${if (info.enabled) "系统已开启" else "系统未开启"}")
+                                if (info.supported) Help("头部跟踪：${if (info.headTracker) "可用" else "不可用"} · 多声道能力：${if (info.multichannelCapable) "支持" else "不支持"}")
+                                FlatAction("刷新状态") { SpatialInfo.refresh() }
+                                Help("空间音频由系统与输出设备决定。")
+                            }
+                            SectionCard("诊断与系统音效") {
+                                Help("当前引擎：${if (precise) "精确" else "系统"} · 会话 $sid")
+                                Help("系统均衡：${if (available) "支持" else "不可用"} · ${if (control) "拥有控制权" else "未控制"}")
+                                Help("动态处理：${if (dynamicsAvailable) "支持" else "不可用"} · 可视化：${if (fft) "FFT" else "PCM"}")
+                                Help("均衡实际状态：${if (actualEqEnabled) "已启用" else "未启用"} · 低音控制权：${if (bassControl) "拥有" else "未控制"}")
+                                Help(lastApplied ?: "智能调音尚未应用")
+                                val panel = AudioFxController.systemPanelIntent()
+                                FlatAction("打开系统音效面板", panel != null) {
+                                    runCatching { ctx.startActivity(panel) }.onFailure { toastMain(ctx, "无法打开系统音效面板") }
+                                }
+                            }
                         }
                     }
                 }
             }
-            Spacer(Modifier.height(18.dp))
-
-            // ── 低音增强 ──
-            SectionCard(title = "低音增强") {
-                Row(
-                    Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Text("0", color = colors.textTertiary, fontSize = 12.sp)
-                    HorizontalShadeSlider(
-                        progress = bass / 1000f,
-                        onProgress = { EqualizerHost.setBass(it) },
-                        enabled = enabled,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text("100", color = colors.textTertiary, fontSize = 12.sp)
-                }
-            }
-            // ── 动态范围压缩（DVC）──（设备不支持 DynamicsProcessing 时隐藏）
-            if (dynamicsAvailable) {
-                Spacer(Modifier.height(18.dp))
-                SectionCard(title = "动态范围压缩 (DVC)") {
-                    ToggleRow("压低响度差", dvc) { DynamicsFxHost.setDvc(!dvc) }
-                    Text(
-                        "副歌不再突然炸耳，夜间/通勤听歌更舒适；对音质有轻微影响，默认关闭。",
-                        fontSize = 11.sp, color = colors.textTertiary,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    )
-
-                    Spacer(Modifier.height(6.dp))
-
-                    // 声道平衡
-                    Text(
-                        "声道平衡", fontSize = 13.sp, color = colors.textSecondary,
-                        modifier = Modifier.padding(start = 6.dp),
-                    )
-                    Row(
-                        Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Text("左", color = colors.textTertiary, fontSize = 12.sp)
-                        HorizontalShadeSlider(
-                            progress = (balance + 100) / 200f,
-                            onProgress = {
-                                DynamicsFxHost.setBalance((it * 200 - 100).toInt())
-                            },
-                            enabled = true,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text("右", color = colors.textTertiary, fontSize = 12.sp)
-                    }
-                    Text(
-                        when {
-                            balance == 0 -> "居中"
-                            balance < 0 -> "偏左 ${-balance}%"
-                            else -> "偏右 ${balance}%"
-                        },
-                        color = colors.textTertiary, fontSize = 11.sp,
-                        modifier = Modifier.padding(horizontal = 8.dp),
-                    )
-                }
-            }
-
-            // ── 播放速度 / 音调 ──
-            Spacer(Modifier.height(18.dp))
-            SectionCard(title = "速度与音调") {
-                Text(
-                    "速度 ×%.2f".format(speed),
-                    fontSize = 13.sp, color = colors.textSecondary,
-                    modifier = Modifier.padding(start = 6.dp),
-                )
-                HorizontalShadeSlider(
-                    progress = (speed - 0.5f) / 1.5f,
-                    onProgress = { PlayerHost.setPlaybackParams(0.5f + it * 1.5f, pitch) },
-                    enabled = true,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
-                )
-                Text(
-                    "音调 ×%.2f".format(pitch),
-                    fontSize = 13.sp, color = colors.textSecondary,
-                    modifier = Modifier.padding(start = 6.dp),
-                )
-                HorizontalShadeSlider(
-                    progress = (pitch - 0.5f) / 1.5f,
-                    onProgress = { PlayerHost.setPlaybackParams(speed, 0.5f + it * 1.5f) },
-                    enabled = true,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
-                )
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "变速不变调可分开调；音调变高/变低即升/降 key。",
-                        fontSize = 11.sp, color = colors.textTertiary, modifier = Modifier.weight(1f),
-                    )
-                    Text(
-                        "重置",
-                        color = colors.accent, fontSize = 12.sp, fontWeight = FontWeight.Medium,
-                        modifier = Modifier.flatTap {
-                            PlayerHost.setPlaybackParams(1f, 1f)
-                        }.padding(horizontal = 10.dp, vertical = 4.dp),
-                    )
-                }
-            }
-
-            // ── 智能调音：每个曲风可以挑任意预设 ──
-            Spacer(Modifier.height(18.dp))
-            SectionCard(title = "智能调音") {
-                ToggleRow("按曲目风格自动选预设", smartEq) {
-                    Prefs.smartEq = !smartEq
-                    smartEq = !smartEq
-                }
-                Text(
-                    lastApplied ?: "开启后换歌时按下面的映射自动套用预设。",
-                    fontSize = 11.sp, color = colors.textTertiary,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                )
-                Spacer(Modifier.height(4.dp))
-                androidx.compose.foundation.layout.FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    // key 加版本号：改完映射让 chips 重组刷新
-                    androidx.compose.runtime.key(genreMapVersion) {
-                        SmartEq.GENRES.forEach { (code, label) ->
-                            val mapped = EqualizerHost.genreMap()[code] ?: "未映射"
-                            Text(
-                                "$label · $mapped",
-                                fontSize = 12.sp,
-                                color = colors.textPrimary,
-                                modifier = Modifier
-                                    .flatTap { genrePick = code to label }
-                                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                            )
-                        }
-                    }
-                }
-                Text(
-                    "点某个曲风可为它挑预设（含自建预设）。",
-                    fontSize = 11.sp, color = colors.textTertiary,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                )
-            }
-
-            Spacer(Modifier.height(24.dp + barSpace))   // 底部留白：播放栏实测高度
+            Spacer(Modifier.height(24.dp + barSpace))
         }
-            if (eqScroll.value > 0) TopEdgeFade()
-        }
+        if (scroll.value > 0) TopEdgeFade()
     }
-
-    // ── 弹窗们 ──
-    if (showAddDialog) {
-        AddPresetDialog(
-            onDismiss = { showAddDialog = false },
-            onConfirm = { name ->
-                EqualizerHost.addPreset(name)
-                showAddDialog = false
-                toastMain(ctx, "已新增预设「${name.trim().ifEmpty { "新预设" }}」")
-            },
-        )
-    }
-    deleteTarget?.let { p ->
-        ShadeDialog(onDismiss = { deleteTarget = null }, title = "删除预设") {
-            Text(
-                "确定删除「${p.name}」？此操作不可撤销。",
-                color = colors.textSecondary, fontSize = 13.sp,
-                modifier = Modifier.padding(horizontal = 20.dp),
-            )
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "取消", color = colors.textSecondary, fontSize = 14.sp,
-                    modifier = Modifier.flatTap { deleteTarget = null }.padding(horizontal = 12.dp, vertical = 6.dp),
-                )
-                Text(
-                    "删除", color = colors.accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.flatTap {
-                        EqualizerHost.deletePreset(p.name)
-                        deleteTarget = null
-                    }.padding(horizontal = 12.dp, vertical = 6.dp),
-                )
-            }
+    if (add) AddPresetDialog({ add = false }) { EqualizerHost.addPreset(it); add = false }
+    delete?.let { p ->
+        ShadeDialog(onDismiss = { delete = null }, title = "删除预设") {
+            Help("删除「${p.name}」？")
+            FlatAction("取消") { delete = null }
+            FlatAction("删除") { EqualizerHost.deletePreset(p.name); delete = null }
+            FlatAction("导出此预设") { exportText = EqualizerHost.exportPreset(p.name).orEmpty(); exportFile.launch("${p.name}.txt") }
         }
     }
     genrePick?.let { (code, label) ->
-        // 打开弹窗那一刻快照预设列表（自建/删除后重新打开即是新表）
-        val snapshot = EqualizerHost.presets.value
-        ShadeDialog(onDismiss = { genrePick = null }, title = "$label 映射到哪个预设？") {
-            androidx.compose.foundation.lazy.LazyColumn(Modifier.height(320.dp)) {
-                items(snapshot.size) { i ->
-                    ShadeDialogRow(snapshot[i].name) {
-                        EqualizerHost.setGenrePreset(code, snapshot[i].name)
-                        genreMapVersion++
-                        genrePick = null
-                    }
+        ShadeDialog(onDismiss = { genrePick = null }, title = "$label 的预设") {
+            androidx.compose.foundation.lazy.LazyColumn(Modifier.heightIn(max = 360.dp)) {
+                item { ShadeDialogRow("未映射") { EqualizerHost.setGenrePreset(code, null); mapVersion++; genrePick = null } }
+                items(presets.size) { i ->
+                    ShadeDialogRow(presets[i].name) { EqualizerHost.setGenrePreset(code, presets[i].name); mapVersion++; genrePick = null }
                 }
             }
         }
     }
-}
-
-/** 凸起卡内的开关行：右侧是新拟物开关（凹陷轨道 + 凸起滑块，用户 2026-10-01 规格）。 */
-@Composable
-private fun ToggleRow(label: String, on: Boolean, onTap: () -> Unit) {
-    val colors = LocalShadeColors.current
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(vertical = 3.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            label,
-            fontSize = 14.sp,
-            color = if (on) colors.accent else colors.textPrimary,
-            fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
-            modifier = Modifier.weight(1f),
-        )
-        ShadeSwitch(checked = on, onCheckedChange = { onTap() })
+    if (autoEqOpen) AutoEqDialog({ autoEqOpen = false }) { entry ->
+        toastMain(ctx, importMessage(EqualizerHost.importPreset(entry.name, entry.text, source = "autoeq:${entry.source}")))
+        autoEqOpen = false
     }
 }
 
-/** 新增预设弹窗：输入名字，以当前频段值入库。 */
+@Composable
+private fun ValueSlider(label: String, initial: Float, range: ClosedFloatingPointRange<Float>, enabled: Boolean,
+    format: (Float) -> String, preview: (Float) -> Unit, commit: () -> Unit) {
+    val colors = LocalShadeColors.current
+    var value by remember(initial) { mutableFloatStateOf(initial) }
+    Column(Modifier.padding(horizontal = 6.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(label, color = colors.textSecondary, fontSize = 13.sp)
+            Text(format(value), color = colors.textSecondary, fontSize = 13.sp)
+        }
+        HorizontalShadeSlider((value - range.start) / (range.endInclusive - range.start),
+            { value = range.start + it * (range.endInclusive - range.start); preview(value) }, enabled,
+            Modifier.fillMaxWidth().semantics { contentDescription = label }, { commit() })
+    }
+}
+
+@Composable
+private fun VerticalBandSlider(label: String, progress: Float, range: IntArray, enabled: Boolean, editKey: Long,
+    onProgress: (Float) -> Unit, onCommit: () -> Unit) {
+    val colors = LocalShadeColors.current
+    var height by remember { mutableFloatStateOf(1f) }
+    var value by remember(progress) { mutableFloatStateOf(progress) }
+    val preview by rememberUpdatedState(onProgress)
+    val commit by rememberUpdatedState(onCommit)
+    val latestKey by rememberUpdatedState(editKey)
+    fun update(y: Float) { value = (1 - y / height).coerceIn(0f, 1f); preview(value) }
+    Column(Modifier.width(48.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("%+.1f".format((range[0] + value * (range[1] - range[0])) / 100f), color = colors.textSecondary, fontSize = 11.sp)
+        Box(Modifier.width(48.dp).height(156.dp).semantics {
+            contentDescription = "$label Hz 增益"
+            progressBarRangeInfo = ProgressBarRangeInfo(value, 0f..1f)
+            if (!enabled) disabled()
+            setProgress { target -> if (enabled) { value = target.coerceIn(0f, 1f); preview(value); commit(); true } else false }
+        }.pointerInput(enabled, editKey) {
+            val captured = editKey
+            if (enabled) detectTapGestures { if (captured == latestKey) { update(it.y); commit() } }
+        }.pointerInput(enabled, editKey) {
+            val captured = editKey
+            if (enabled) detectVerticalDragGestures(
+                onDragStart = { if (captured == latestKey) update(it.y) },
+                onDragEnd = { if (captured == latestKey) commit() },
+                onDragCancel = { if (captured == latestKey) commit() },
+            ) { c, _ -> if (captured == latestKey) update(c.position.y) }
+        }, contentAlignment = Alignment.Center) {
+            Box(Modifier.width(26.dp).fillMaxHeight().onSizeChanged { height = it.height.toFloat() }
+                .shadeInset(13.dp, 3.dp, 4.dp)) {
+                Box(Modifier.fillMaxWidth().fillMaxHeight(value).align(Alignment.BottomCenter).padding(3.dp)
+                    .background(if (enabled) colors.accent else colors.textTertiary, RoundedCornerShape(10.dp)))
+            }
+        }
+        Text(label, color = colors.textSecondary, fontSize = 11.sp)
+    }
+}
+
+@Composable
+private fun ToggleRow(label: String, checked: Boolean, enabled: Boolean = true, onChange: (Boolean) -> Unit) {
+    val colors = LocalShadeColors.current
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).alphaDisabled(!enabled)
+        .semantics(mergeDescendants = true) {
+            role = Role.Switch
+            toggleableState = if (checked) androidx.compose.ui.state.ToggleableState.On else androidx.compose.ui.state.ToggleableState.Off
+            if (!enabled) disabled()
+            onClick { if (enabled) { onChange(!checked); true } else false }
+        }.pointerInput(checked, enabled) { detectTapGestures { if (enabled) onChange(!checked) } },
+        verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = colors.textPrimary, fontSize = 14.sp, modifier = Modifier.weight(1f))
+        ShadeSwitch(checked, { if (enabled) onChange(it) }, enabled = enabled)
+    }
+}
+
+@Composable
+private fun SectionCard(title: String, content: @Composable ColumnScope.() -> Unit) {
+    val colors = LocalShadeColors.current
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).shadeSurface(24.dp, 6.dp, 10.dp).padding(12.dp)) {
+        Text(title, color = colors.textSecondary, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 6.dp, bottom = 8.dp))
+        content()
+    }
+}
+
+@Composable
+private fun Help(text: String) {
+    Text(text, color = LocalShadeColors.current.textSecondary, fontSize = 12.sp, lineHeight = 18.sp, modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp))
+}
+
+@Composable
+private fun FlatAction(label: String, enabled: Boolean = true, onClick: () -> Unit) {
+    Text(label, color = if (enabled) LocalShadeColors.current.accent else LocalShadeColors.current.textTertiary,
+        fontSize = 13.sp, modifier = Modifier.heightIn(min = 48.dp)
+            .flatPressable { if (enabled) onClick() }.semantics { if (!enabled) disabled() }
+            .padding(horizontal = 12.dp, vertical = 14.dp))
+}
+private fun Modifier.alphaDisabled(disabled: Boolean) = if (disabled) alpha(.45f) else this
+
+private fun freqLabel(hz: Int): String = if (hz >= 1000) "${if (hz % 1000 == 0) (hz / 1000).toString() else "%.1f".format(hz / 1000f)}k" else "$hz"
+private fun importMessage(result: EqTextCodec.ParseResult): String = result.error ?:
+    "已导入 ${result.accepted} 条，跳过 ${result.skipped} 条；参数预设请使用精确引擎。"
+private fun readPresetBytes(input: java.io.InputStream): ByteArray {
+    val out = java.io.ByteArrayOutputStream()
+    val buffer = ByteArray(8192)
+    while (out.size() <= 256 * 1024) {
+        val count = input.read(buffer, 0, minOf(buffer.size, 256 * 1024 + 1 - out.size()))
+        if (count < 0) break
+        if (count == 0) break
+        out.write(buffer, 0, count)
+    }
+    return out.toByteArray()
+}
+
 @Composable
 private fun AddPresetDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
     val colors = LocalShadeColors.current
     var name by remember { mutableStateOf("") }
     ShadeDialog(onDismiss = onDismiss, title = "新增预设") {
-        Text(
-            "以当前频段滑杆的值创建一个新预设。",
-            color = colors.textTertiary, fontSize = 12.sp,
-            modifier = Modifier.padding(horizontal = 20.dp),
-        )
-        BasicTextField(
-            value = name,
-            onValueChange = { name = it },
-            singleLine = true,
-            textStyle = androidx.compose.ui.text.TextStyle(
-                color = colors.textPrimary, fontSize = 15.sp,
-            ),
-            cursorBrush = SolidColor(colors.accent),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 12.dp)
-                .background(colors.background, RoundedCornerShape(12.dp))
-                .shadeInset(cornerRadius = 12.dp, offset = 2.dp, blur = 3.dp)
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-        )
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 14.dp),
-            horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                "取消", color = colors.textSecondary, fontSize = 14.sp,
-                modifier = Modifier.flatTap(onDismiss).padding(horizontal = 12.dp, vertical = 6.dp),
-            )
-            Text(
-                "创建", color = colors.accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.flatTap { onConfirm(name) }.padding(horizontal = 12.dp, vertical = 6.dp),
-            )
+        Help("保存当前频段与参数。")
+        BasicTextField(name, { name = it }, singleLine = true, textStyle = TextStyle(color = colors.textPrimary, fontSize = 15.sp),
+            cursorBrush = SolidColor(colors.accent), modifier = Modifier.fillMaxWidth().padding(16.dp)
+                .semantics { contentDescription = "预设名称" }.shadeInset(12.dp, 2.dp, 3.dp).padding(14.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            FlatAction("取消", onClick = onDismiss)
+            FlatAction("创建") { onConfirm(name) }
         }
     }
 }
 
 @Composable
-private fun SectionCard(title: String, content: @Composable () -> Unit) {
+private fun AutoEqDialog(onDismiss: () -> Unit, onSelect: (AutoEq.Entry) -> Unit) {
+    val ctx = LocalContext.current
     val colors = LocalShadeColors.current
-    Column(
-        Modifier.fillMaxWidth().padding(horizontal = 16.dp)
-                    .shadeSurface(cornerRadius = 24.dp, offset = 6.dp, blur = 10.dp).padding(12.dp),
-    ) {
-        Text(
-            title, fontSize = 13.sp, color = colors.textSecondary,
-            modifier = Modifier.padding(start = 6.dp, bottom = 8.dp),
-        )
-        content()
+    var query by remember { mutableStateOf("") }
+    var entries by remember { mutableStateOf<List<AutoEq.Entry>?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        runCatching { withContext(Dispatchers.IO) { AutoEq.load(ctx) } }
+            .onSuccess { entries = it }.onFailure { error = "无法加载耳机补偿库" }
     }
-}
-
-/** 平面点击（凸起容器内部用；不给阴影）。 */
-private fun Modifier.flatTap(onTap: () -> Unit): Modifier = this.pointerInput(onTap) {
-    detectTapGestures(onTap = { onTap() })
-}
-
-/** 竖直频段滑杆：凹陷轨道 + accent 填充（自下而上）。 */
-@Composable
-private fun VerticalBandSlider(
-    label: String,
-    progress: Float,
-    onProgress: (Float) -> Unit,
-    enabled: Boolean,
-) {
-    val colors = LocalShadeColors.current
-    var trackH by remember { mutableFloatStateOf(1f) }
-    var dragging by remember { mutableStateOf(false) }
-    var value by remember(progress) { mutableFloatStateOf(progress) }
-
-    val fill by animateColorAsState(
-        if (enabled) colors.accent else colors.textTertiary.copy(alpha = 0.4f),
-        tween(200), label = "bandFill",
-    )
-
-    fun update(y: Float) {
-        if (!enabled) return
-        value = (1f - y / trackH).coerceIn(0f, 1f)
-        onProgress(value)
-    }
-
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(dbLabel(value), color = colors.textSecondary, fontSize = 11.sp)
-        Spacer(Modifier.height(6.dp))
-        Box(
-            Modifier
-                .width(26.dp)
-                .height(150.dp)
-                .onSizeChanged { trackH = it.height.toFloat().coerceAtLeast(1f) }
-                .shadeInset(cornerRadius = 13.dp, offset = 3.dp, blur = 4.dp)
-                .pointerInput(enabled) {
-                    detectTapGestures { offset -> update(offset.y) }
-                }
-                .pointerInput(enabled) {
-                    detectDragGestures(
-                        onDragStart = { offset -> dragging = true; update(offset.y) },
-                        onDragEnd = { dragging = false },
-                        onDragCancel = { dragging = false },
-                    ) { change, _ -> update(change.position.y) }
-                },
-        ) {
-            // 填充：从底部往上
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .fillMaxHeight(value)
-                    .align(Alignment.BottomCenter)
-                    .padding(3.dp)
-                    .background(fill, RoundedCornerShape(10.dp)),
-            )
+    val filtered = remember(entries, query) { entries?.filter { it.name.contains(query.trim(), ignoreCase = true) }.orEmpty() }
+    ShadeDialog(onDismiss = onDismiss, title = "耳机补偿 · AutoEq") {
+        Help("离线精选 218 个型号（Score ≥ 80），仅覆盖库内型号；请选择完全一致的耳机。")
+        BasicTextField(query, { query = it }, singleLine = true, textStyle = TextStyle(color = colors.textPrimary, fontSize = 14.sp),
+            cursorBrush = SolidColor(colors.accent), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+                .semantics { contentDescription = "搜索耳机型号" }.shadeInset(12.dp, 2.dp, 3.dp).padding(12.dp),
+            decorationBox = { inner -> if (query.isEmpty()) Text("搜索型号", color = colors.textTertiary, fontSize = 14.sp); inner() })
+        when { error != null -> Help(error!!); entries == null -> Help("加载中…"); filtered.isEmpty() -> Help("库内没有匹配型号，可导入外部参数文本。") }
+        androidx.compose.foundation.lazy.LazyColumn(Modifier.heightIn(max = 340.dp)) {
+            items(filtered, key = { "${it.name} · ${it.source}" }) { entry -> ShadeDialogRow("${entry.name} · ${entry.source}") { onSelect(entry) } }
         }
-        Spacer(Modifier.height(6.dp))
-        Text(label, color = colors.textSecondary, fontSize = 11.sp, textAlign = TextAlign.Center)
     }
-}
-
-/** Hz → 人话（60 / 230 / 1k / 4k / 14k）。 */
-private fun freqLabel(hz: Int): String = when {
-    hz >= 1000 -> "${hz / 1000}k"
-    hz > 0 -> "$hz"
-    else -> "—"
-}
-
-/** 进度 → dB 文案（范围 -15..+15dB）。 */
-private fun dbLabel(progress: Float): String {
-    val db = (progress * 30 - 15)
-    return "%+.0f".format(db) + "dB"
 }

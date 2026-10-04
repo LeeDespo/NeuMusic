@@ -29,6 +29,7 @@ class PlaybackService : Service() {
     companion object {
         const val ACTION_UPDATE = "com.neumusic.player.PLAYBACK_UPDATE"
         const val ACTION_TOGGLE = "com.neumusic.player.PLAYBACK_TOGGLE"
+        const val ACTION_RELEASE = "com.neumusic.player.PLAYBACK_RELEASE"
         const val ACTION_STOP = "com.neumusic.player.PLAYBACK_STOP"
 
         const val EXTRA_TITLE = "title"
@@ -80,10 +81,17 @@ class PlaybackService : Service() {
                 PlayerHost.toggle()
                 return START_STICKY   // 通知由 PlayerHost 的播放态回调再刷一次
             }
-            ACTION_STOP -> {
-                PlayerHost.pause()
+            ACTION_RELEASE -> {
+                PlayerHost.release()
                 stopForegroundCompat()
                 stopSelf()
+                return START_NOT_STICKY
+            }
+            ACTION_STOP -> {
+                // Internal notification cleanup follows an already completed pause/release.
+                // It must not pause a player that has since resumed or been recreated.
+                stopForegroundCompat()
+                stopSelf(startId)
                 return START_NOT_STICKY
             }
         }
@@ -153,7 +161,7 @@ class PlaybackService : Service() {
         )
         val close = PendingIntent.getService(
             this, 2,
-            Intent(this, PlaybackService::class.java).setAction(ACTION_STOP),
+            Intent(this, PlaybackService::class.java).setAction(ACTION_RELEASE),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)

@@ -12,6 +12,7 @@ android {
         applicationId = "com.neumusic.player"
         minSdk = 26
         targetSdk = 35   // Android 15+ 只有 targetSdk>=35 才真正边到边（否则系统强加状态栏色块）
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         versionCode = 1
         versionName = "0.1.0"
 
@@ -50,6 +51,10 @@ configurations.all {
 }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("junit:junit:4.13.2")
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui")
