@@ -34,8 +34,8 @@ NeuMusic 的核心目标是探索一件事：**在纯 Compose 里手写一套完
 - **强调色**：Material You（`dynamicColorScheme`，Android 12+）只取 primary 作为 accent
 - **播放**：Media3 / ExoPlayer，`PlaybackParameters` 实现变速变调；音频管线插入透传 `AudioProcessor` 采集 PCM 做可视化（免录音权限）
 - **音效**：Android 平台 audiofx（`Equalizer` / `BassBoost` / `DynamicsProcessing`），全部挂到播放器音频会话
-- **逐字歌词**：QRC 密文（hex）→ 移植自 qrc-decoder 的非标准类 DES 三重解密 → zlib → 逐字时间轴，渲染层用双层文本 + `clipRect` 扫色（AMLL 式）
-- **数据**：OkHttp + org.json 直连网页接口，OkHttp 异步 + StateFlow 响应式；接口字段与调用细节见源码注释（均经实测校准）
+- **逐字歌词**：QRC 密文解码由内嵌 HelperNext 组件完成（非标准类 DES 三重解密 → zlib，算法与 qrc-decoder 同源），渲染层用双层文本 + `clipRect` 扫色（AMLL 式）
+- **数据**：内嵌 [HelperNext](https://github.com/LeeDespo/QQMusicApi_HelperNext) Rust/BoltFFI 组件直连 QQ 音乐接口（凭据、设备档案、限流、QRC 解码均在组件内），宿主各域 Api 只做组件 JSON → UI 数据的薄适配，StateFlow 响应式；接口字段与调用细节见源码注释（均经实测校准）
 
 ## 构建
 

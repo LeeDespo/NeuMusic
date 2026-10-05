@@ -1,4 +1,5 @@
 # QQMusicApi_HelperNext 组件接口盘点
+> **历史快照注记（2026-10-05）**：本文写于 HelperNext 组件接入前后，文中引用的 `data/api/QqCore.kt`、`data/api/QrcCodec.kt` 及「原生 Kotlin 直连」均为**当时的工程状态**——这些文件现已删除，QQ 请求/签名/设备档案/凭据/QRC 解密改由 HelperNext Rust 组件经 BoltFFI/JNI 执行（见 `AGENTS.md` 顶部「2026-10-05 当前 QQ 数据架构」）。本文仅作调研证据保留，其中的机制描述与代码行号引用不再反映现状；端点、参数与实测结论仍有参考价值。
 
 - 源码：`/tmp/helpernext_probe`（工作区外，只读），git 提交 `2ff7e71`（`git log --oneline -1` → `2ff7e71 feat: stop when the host stops, however it stopped`）。
 - 版本：`Cargo.toml` `version = "0.1.0"`，`license = "GPL-3.0-or-later"`；组件自报 `helperVersion=0.1.0`、`protocolVersion=2`（`src/methods.rs:20-23`，实测 `get_helper_info` 输出）。

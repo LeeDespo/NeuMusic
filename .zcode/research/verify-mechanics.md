@@ -1,4 +1,5 @@
 # 独立复核：HelperNext 如何被 Android 宿主接入（反证版）
+> **历史快照注记（2026-10-05）**：本文写于 HelperNext 组件接入前后，文中引用的 `data/api/QqCore.kt`、`data/api/QrcCodec.kt` 及「原生 Kotlin 直连」均为**当时的工程状态**——这些文件现已删除，QQ 请求/签名/设备档案/凭据/QRC 解密改由 HelperNext Rust 组件经 BoltFFI/JNI 执行（见 `AGENTS.md` 顶部「2026-10-05 当前 QQ 数据架构」）。本文仅作调研证据保留，其中的机制描述与代码行号引用不再反映现状；端点、参数与实测结论仍有参考价值。
 
 复核对象：`/tmp/helpernext_probe`（组件源码 + probe 打包产物）、`/tmp/helpernext_pack_rehearsal/repo`（打过补丁的打包排练产物）、工程 `AGENTS.md`。
 

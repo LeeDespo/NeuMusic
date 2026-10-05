@@ -1,4 +1,5 @@
 # 播放与写入域：工程能力 ↔ 组件方法 逐条对应
+> **历史快照注记（2026-10-05）**：本文写于 HelperNext 组件接入前后，文中引用的 `data/api/QqCore.kt`、`data/api/QrcCodec.kt` 及「原生 Kotlin 直连」均为**当时的工程状态**——这些文件现已删除，QQ 请求/签名/设备档案/凭据/QRC 解密改由 HelperNext Rust 组件经 BoltFFI/JNI 执行（见 `AGENTS.md` 顶部「2026-10-05 当前 QQ 数据架构」）。本文仅作调研证据保留，其中的机制描述与代码行号引用不再反映现状；端点、参数与实测结论仍有参考价值。
 
 > **范围**：播放直链与音质档位降级、歌曲详情/简介、逐字歌词与翻译（译/音/注三开关）、喜欢（写入）、封面 URL、登录与凭据（网页 cookie 与扫码）、下载、播放条/播放页对在线层的依赖。
 > **两侧源码都亲自读过**：组件 `/tmp/helpernext_probe/src/{methods,catalog,models,qrc,login,credential,upstream,guard,api,aria2,bin/stdio}.rs`（git `2ff7e71`）；工程 `app/src/main/java/com/neumusic/player/`（只读）。清单文件 `.zcode/research/{helpernext-inventory,project-api-inventory,project-requirements}.md` 只当作索引，结论均回到源码。
