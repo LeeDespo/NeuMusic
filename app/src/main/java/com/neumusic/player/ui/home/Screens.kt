@@ -158,6 +158,9 @@ fun TrackListScreen(
     var total by remember { mutableStateOf(TrackListCache.total(cacheKey) ?: knownTotal) }
     var loadingMore by remember { mutableStateOf(false) }
     var failedAt by remember { mutableStateOf<Int?>(null) } // 失败时的 offset，重试从这继续
+    // 单轮 50 页上限触发的「正常截断」：按暂停续传处理而非失败（否则大歌单会显示假的
+    // 「加载失败」且不落缓存）。与 failedAt 分开记；随缓存持久化，重进后仍可继续。
+    var pausedAt by remember(cacheKey) { mutableStateOf(TrackListCache.pausedAt(cacheKey)) }
     // 无限流：数据源已循环到底（loadPage 返回空）就不再请求
     var exhausted by remember { mutableStateOf(false) }
     val endlessMode = endless && total == null
@@ -243,10 +246,10 @@ fun TrackListScreen(
                     offset = next
                     if (t == null && page.nextOffset == null && page.songs.size < pageSize) break
                 }
-                if (guard > 50) failedAt = offset
+                if (guard > 50) pausedAt = offset
             }
             loaded = true
-            if (tracks.isNotEmpty() && failedAt == null) TrackListCache.put(cacheKey, tracks, total)
+            if (tracks.isNotEmpty() && failedAt == null) TrackListCache.put(cacheKey, tracks, total, pausedAt)
             LikedStore.refresh()
         }
     }
@@ -254,6 +257,7 @@ fun TrackListScreen(
     // 从失败点继续翻页（底部重试入口用）。
     val resumeFrom: (Int) -> Unit = { fromOffset ->
         scope.launch {
+            pausedAt = null // 续传开始先撤「暂停」标记，结束时按实际结果再挂
             val pageSize = 100
             var offset = fromOffset
             var guard = 0
@@ -275,8 +279,8 @@ fun TrackListScreen(
                 offset = next
                 if (t == null && page.nextOffset == null && page.songs.size < pageSize) break
             }
-            if (guard > 50) failedAt = offset
-            if (tracks.isNotEmpty() && failedAt == null) TrackListCache.put(cacheKey, tracks, total)
+            if (guard > 50) pausedAt = offset
+            if (tracks.isNotEmpty() && failedAt == null) TrackListCache.put(cacheKey, tracks, total, pausedAt)
         }
     }
 
@@ -314,12 +318,17 @@ fun TrackListScreen(
             last.index == info.totalItemsCount - 1
         }
     }
-    LaunchedEffect(footerVisible, failedAt, exhausted, endlessMode) {
+    LaunchedEffect(footerVisible, failedAt, pausedAt, exhausted, endlessMode) {
         if (footerVisible && loaded && !loadingMore) {
             if (failedAt != null) {
                 if (retriedVisible) return@LaunchedEffect
                 retriedVisible = true
                 failedAt?.let { offset -> resumeFrom(offset) }
+            } else if (pausedAt != null) {
+                // 暂停续传：滑到底部也自动续一次，节流与失败重试同一套（retriedVisible）
+                if (retriedVisible) return@LaunchedEffect
+                retriedVisible = true
+                pausedAt?.let { offset -> resumeFrom(offset) }
             } else if (endlessMode && !exhausted) {
                 appendNext()
             }
@@ -424,8 +433,12 @@ fun TrackListScreen(
                             total = total,
                             loading = loadingMore,
                             failedAt = failedAt,
+                            pausedAt = pausedAt,
                             exhausted = exhausted,
-                            onRetry = { failedAt?.let(resumeFrom) },
+                            onRetry = {
+                                val from = failedAt ?: pausedAt
+                                from?.let(resumeFrom)
+                            },
                         )
                     }
                 }
@@ -496,18 +509,20 @@ fun TrackListScreen(
 /**
  * 详情列表的进程内缓存（歌单/专辑/我喜欢/电台共用）。
  *
- * 只缓存**已取全**的结果；超过 [MAX] 个条目时整体清空（条目都是小列表，粗暴但要够用）。
+ * 缓存**已取全**或因单轮上限暂停（[put] 的 pausedAt）的结果；
+ * 超过 [MAX] 个条目时整体清空（条目都是小列表，粗暴但要够用）。
  * 退出登录时由设置页调用 [clear]（收藏类数据与账号绑定）。
  */
 object TrackListCache {
     private const val MAX = 12
 
-    /** 已取全的曲目 + 总数 + 上次滚动位置（首项下标、像素偏移）。 */
+    /** 曲目 + 总数 + 上次滚动位置（首项下标、像素偏移）+ 单轮上限暂停的续传点。 */
     private class Entry(
         val tracks: List<Track>,
         val total: Int?,
         var scrollIndex: Int = 0,
         var scrollOffset: Int = 0,
+        val pausedAt: Int? = null,
     )
 
     private val map = HashMap<String, Entry>()
@@ -517,15 +532,18 @@ object TrackListCache {
     /** 总数。 */
     fun total(key: String): Int? = synchronized(map) { map[key]?.total }
 
+    /** 单轮上限暂停的续传点（null=已取全或无缓存）。 */
+    fun pausedAt(key: String): Int? = synchronized(map) { map[key]?.pausedAt }
+
     /** 上次滚动位置（下标、偏移）。 */
     fun scroll(key: String): Pair<Int, Int> =
         synchronized(map) { map[key]?.let { it.scrollIndex to it.scrollOffset } ?: (0 to 0) }
 
-    fun put(key: String, tracks: List<Track>, total: Int?) {
+    fun put(key: String, tracks: List<Track>, total: Int?, pausedAt: Int? = null) {
         synchronized(map) {
             val old = map[key]
             if (map.size >= MAX && old == null) map.clear()
-            map[key] = Entry(tracks, total, old?.scrollIndex ?: 0, old?.scrollOffset ?: 0)
+            map[key] = Entry(tracks, total, old?.scrollIndex ?: 0, old?.scrollOffset ?: 0, pausedAt)
         }
     }
 
@@ -543,6 +561,7 @@ private fun ListFooter(
     total: Int?,
     loading: Boolean,
     failedAt: Int?,
+    pausedAt: Int? = null,
     exhausted: Boolean = false,
     onRetry: () -> Unit,
 ) {
@@ -564,6 +583,13 @@ private fun ListFooter(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("加载失败，点击重试", color = colors.accent, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            }
+            // 单轮上限的正常截断：不是失败，提供「继续加载」入口（滑到底也会自动续传）
+            pausedAt != null -> Row(
+                Modifier.flatPressable(cornerRadius = 14.dp, onClick = onRetry).padding(horizontal = 16.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("已加载 $loadedCount 首 · 点击继续加载", color = colors.accent, fontSize = 12.sp, fontWeight = FontWeight.Medium)
             }
             failedAt == null && exhausted -> Text("没有更多了", color = colors.textTertiary, fontSize = 12.sp)
             else -> {

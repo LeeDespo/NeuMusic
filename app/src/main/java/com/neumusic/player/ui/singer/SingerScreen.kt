@@ -149,7 +149,8 @@ fun SingerScreen(
                     }.onFailure { st.songsError = "加载失败，点此重试" }
                 } else {
                     runCatching { SingerApi.albums(singer.mid, apiOrder, 0, 30) }.onSuccess { p ->
-                        st.albums = p.albums
+                        st.albums = p.albums.distinctBy { it.mid }
+                        st.albumsOffset = p.advanceFrom(0)
                         p.total?.let { st.albumsTotal = it }
                         st.albumsLoaded = true
                         st.albumsError = null
@@ -171,7 +172,14 @@ fun SingerScreen(
                     if (!st.songsEnded && (st.songsTotal <= 0 || st.songsOffset < st.songsTotal)) {
                         val offset = st.songsOffset
                         runCatching { SingerApi.songs(singer.mid, apiOrder, offset, 100) }.onSuccess { p ->
-                            val next = p.advanceFrom(offset)
+                            // advanceFrom 内部 check 偏移倒退（PlaylistApi.Page）；onSuccess 的 lambda
+                            // 不在 runCatching 覆盖内、外层 try 只有 finally——异常会沿协程逃逸崩 App，
+                            // 必须在这里兜成失败态走底部重试（同 Screens.kt 的翻页写法）。
+                            val next = runCatching { p.advanceFrom(offset) }.getOrNull()
+                            if (next == null) {
+                                st.songsError = "加载失败，点此重试"
+                                return@onSuccess
+                            }
                             if (next > offset) {
                                 st.songs = (st.songs + p.songs).distinctBy { it.mid }
                                 st.songsOffset = next
@@ -184,14 +192,19 @@ fun SingerScreen(
                         }.onFailure { st.songsError = "加载失败，点此重试" }
                     }
                 } else {
-                    if (st.albumsTotal <= 0 || st.albums.size < st.albumsTotal) {
-                        runCatching { SingerApi.albums(singer.mid, apiOrder, st.albums.size, 30) }.onSuccess { p ->
+                    if (st.albumsTotal <= 0 || st.albumsOffset < st.albumsTotal) {
+                        // 专辑分页按原始行偏移推进（组件不回传 nextOffset；无 mid 行同样占上游位置，
+                        // 用过滤后的 albums.size 会在有不可用行时重复拉同一页）。
+                        val offset = st.albumsOffset
+                        runCatching { SingerApi.albums(singer.mid, apiOrder, offset, 30) }.onSuccess { p ->
+                            val next = p.advanceFrom(offset)
                             if (p.albums.isNotEmpty()) {
-                                st.albums = st.albums + p.albums
+                                st.albums = (st.albums + p.albums).distinctBy { it.mid }
                                 p.total?.let { st.albumsTotal = it }
                             }
+                            st.albumsOffset = next
                             st.albumsLoaded = true
-                            st.albumsError = if (p.albums.isEmpty() && st.albumsTotal > st.albums.size) "加载未完成，点此重试" else null
+                            st.albumsError = if (p.albums.isEmpty() && st.albumsTotal > st.albumsOffset) "加载未完成，点此重试" else null
                         }.onFailure { st.albumsError = "加载失败，点此重试" }
                     }
                 }
@@ -416,6 +429,7 @@ private class KeyedData {
     var songs by androidx.compose.runtime.mutableStateOf<List<Track>>(emptyList())
     var albums by androidx.compose.runtime.mutableStateOf<List<AlbumItem>>(emptyList())
     var songsOffset by androidx.compose.runtime.mutableIntStateOf(0)
+    var albumsOffset by androidx.compose.runtime.mutableIntStateOf(0)
     var songsEnded by androidx.compose.runtime.mutableStateOf(false)
     var songsTotal by androidx.compose.runtime.mutableIntStateOf(-1)
     var albumsTotal by androidx.compose.runtime.mutableIntStateOf(-1)

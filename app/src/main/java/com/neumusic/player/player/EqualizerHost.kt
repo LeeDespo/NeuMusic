@@ -267,7 +267,10 @@ object EqualizerHost {
             val existing = map[code]
             if (existing == "" || _presets.value.any { it.name == existing }) continue
             val wanted = existing ?: default
-            map[code] = _presets.value.firstOrNull { normalized(it.name) == normalized(wanted) }?.name.orEmpty()
+            // 预设库还没播种出同名预设时保留原名、留待下次 attach 再解析；
+            // 写空串会被 attach 当作用户主动清除（"" 直接 continue），默认映射就永久丢了。
+            val found = _presets.value.firstOrNull { normalized(it.name) == normalized(wanted) }?.name
+            if (found != null) map[code] = found
         }
         saveGenreMap(map)
     }

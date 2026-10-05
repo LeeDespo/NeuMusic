@@ -611,6 +611,7 @@ private fun PageContent(
             onBack = onBack,
             onOpenAlbum = { onOpen(NavRequest(Nav.AlbumDetail(it.mid, it.name, it.songnum))) },
             onOpenSinger = { s, origin -> onOpen(NavRequest(Nav.Singer(s.mid, s.name, s.pic, s.songNum, s.albumNum), origin)) },
+            onOpenPlaylist = { onOpen(NavRequest(Nav.PlaylistDetail(it.tid, it.name, it.songnum))) },
         )
         Nav.Settings -> SettingsScreen(onBack = onBack)
         Nav.Playlists -> PlaylistsScreen(

@@ -4,13 +4,21 @@ import com.neumusic.player.data.*
 import org.json.JSONObject
 
 object PlaylistApi {
-    data class Page(val songs: List<Track>, val total: Int?, val nextOffset: Int? = null) {
-        fun advanceFrom(offset: Int): Int = (nextOffset ?: (offset + songs.size)).also {
+    data class Page(
+        val songs: List<Track>, val total: Int?, val nextOffset: Int? = null,
+        private val rawRowCount: Int = songs.size,
+    ) {
+        fun advanceFrom(offset: Int): Int = (nextOffset ?: (offset + rawRowCount)).also {
             check(it >= offset) { "歌曲分页偏移倒退" }
         }
     }
-    internal fun page(value: JSONObject) = Page(value.optJSONArray("tracks").items(QqMapper::track), value.total(),
-        if (value.isNull("nextOffset")) null else value.optInt("nextOffset").takeIf { it >= 0 })
+    internal fun page(value: JSONObject): Page {
+        // 回退推进按原始行数（无 MID 的不可用记录仍占上游位置），不按过滤后的 songs.size。
+        val rows = value.optJSONArray("tracks")
+        return Page(rows.items(QqMapper::track), value.total(),
+            if (value.isNull("nextOffset")) null else value.optInt("nextOffset").takeIf { it >= 0 },
+            rows?.length() ?: 0)
+    }
     suspend fun likedPage(offset: Int = 0, num: Int = 100): Page = page(HelperNext.call(
         "fetch_playlist_tracks_page", JSONObject().put("listId", 0).put("dirId", 201).put("offset", offset).put("limit", num)))
     suspend fun playlistPage(tid: Long, offset: Int = 0, num: Int = 100): Page = page(HelperNext.call(

@@ -472,8 +472,13 @@ private fun AutoEqDialog(onDismiss: () -> Unit, onSelect: (AutoEq.Entry) -> Unit
             .onSuccess { entries = it }.onFailure { error = "无法加载耳机补偿库" }
     }
     val filtered = remember(entries, query) { entries?.filter { it.name.contains(query.trim(), ignoreCase = true) }.orEmpty() }
+    // 型号数从 catalog 实际条目推导（scripts/update-autoeq.mjs 随上游重生成，写死会失真）；
+    // 加载完成前不显示数字。
+    val catalogCount = entries?.size
+    val catalogHelp = if (catalogCount == null) "离线精选型号（Score ≥ 80），仅覆盖库内型号；请选择完全一致的耳机。"
+        else "离线精选 $catalogCount 个型号（Score ≥ 80），仅覆盖库内型号；请选择完全一致的耳机。"
     ShadeDialog(onDismiss = onDismiss, title = "耳机补偿 · AutoEq") {
-        Help("离线精选 218 个型号（Score ≥ 80），仅覆盖库内型号；请选择完全一致的耳机。")
+        Help(catalogHelp)
         BasicTextField(query, { query = it }, singleLine = true, textStyle = TextStyle(color = colors.textPrimary, fontSize = 14.sp),
             cursorBrush = SolidColor(colors.accent), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
                 .semantics { contentDescription = "搜索耳机型号" }.shadeInset(12.dp, 2.dp, 3.dp).padding(12.dp),

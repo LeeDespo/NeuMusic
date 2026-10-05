@@ -14,7 +14,6 @@ object RadioApi {
     private suspend fun batch(radioId: Int, firstplay: Boolean): List<Track> = HelperNext.call(
         "fetch_radio_track_batch", JSONObject().put("stationId", radioId).put("firstPlay", firstplay)
             .put("batches", 1).put("excludeMids", org.json.JSONArray())).optJSONArray("tracks").items(QqMapper::track)
-    suspend fun tracks(radioId: Int, num: Int = 50): List<Track>? = batch(radioId, true).ifEmpty { null }
     suspend fun nextTracks(radioId: Int, firstplay: Boolean, exclude: Set<String>, batches: Int = 4): List<Track> {
         val acc = LinkedHashMap<String, Track>()
         var ok = 0

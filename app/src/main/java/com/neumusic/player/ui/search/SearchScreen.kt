@@ -102,6 +102,7 @@ fun SearchScreen(
     onBack: () -> Unit,
     onOpenAlbum: (AlbumItem) -> Unit = {},
     onOpenSinger: (SearchSinger, androidx.compose.ui.geometry.Rect) -> Unit = { _, _ -> },
+    onOpenPlaylist: (PlaylistItem) -> Unit = {},
 ) {
     val barSpace = rememberPlayerBarSpace()
     val context = LocalContext.current
@@ -395,6 +396,7 @@ fun SearchScreen(
                             },
                             onOpenAlbum = onOpenAlbum,
                             onOpenSinger = onOpenSinger,
+                            onOpenPlaylist = onOpenPlaylist,
                             screenWidth = screenWidth,
                         )
                         if (appending) {
@@ -591,6 +593,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.searchResultItems(
     onToggleSelect: (Track) -> Unit,
     onOpenAlbum: (AlbumItem) -> Unit,
     onOpenSinger: (SearchSinger, androidx.compose.ui.geometry.Rect) -> Unit,
+    onOpenPlaylist: (PlaylistItem) -> Unit,
     screenWidth: androidx.compose.ui.unit.Dp,
 ) {
     when (tab) {
@@ -680,7 +683,8 @@ private fun androidx.compose.foundation.lazy.LazyListScope.searchResultItems(
                 key = { it.tid.toString() },
                 horizontalPadding = 16.dp,
             ) { p ->
-                MediaCard(logo = p.logo, title = p.name, count = p.songnum, line2 = null)
+                MediaCard(logo = p.logo, title = p.name, count = p.songnum, line2 = null,
+                    onClick = { onOpenPlaylist(p) })
             }
         }
     }

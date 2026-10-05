@@ -2,6 +2,7 @@ package com.neumusic.player.data.api
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.neumusic.player.data.AppLog
 import com.neumusic.player.data.CredentialInfo
 import com.example.qqmusic_api_helper_next.HelperError
 import com.example.qqmusic_api_helper_next.callWithPlatform
@@ -32,7 +33,11 @@ object HelperNext {
             }.getOrNull()
             if (readCredential() == null && legacy != null) saveCredential(legacy)
             if (readCredential() != null) {
-                check(preferences.edit().remove("credential").commit()) { "凭据迁移保存失败" }
+                // 组件文件已确认有效；删旧副本失败（如磁盘满）不阻断启动——迁移是幂等的，
+                // 下次启动会走到同一分支重试删除。
+                if (!preferences.edit().remove("credential").commit()) {
+                    AppLog.w("HelperNext", "credential migration: legacy copy removal failed; will retry next launch")
+                }
             }
         }
         refreshCredential()
