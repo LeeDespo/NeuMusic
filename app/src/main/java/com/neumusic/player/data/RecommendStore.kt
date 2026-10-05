@@ -17,7 +17,7 @@ import java.io.File
  *
  * 工作方式：`init` 读盘；HomeScreen 找到「猜你喜欢」电台后设 [stationId]；
  * 队列不足 [CAP] 首时 [refill] 按需补（`RadioApi.nextTracks` 避开已展示的 mid，
- * `SongApi.intro` 取介绍），全部走 QqCore 的全局限流闸。`advance` 弹出当前首、
+ * `SongApi.intro` 取介绍），全部由 HelperNext 的请求保护控制。`advance` 弹出当前首、
  * 展示下一首并触发补货。已展示的 mid 记在 [excluded]（随盘持久，防重复推荐）。
  */
 object RecommendStore {

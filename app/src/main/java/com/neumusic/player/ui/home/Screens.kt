@@ -232,16 +232,21 @@ fun TrackListScreen(
                     }
                     failedAt = null
                     total = page.total ?: total
-                    if (page.songs.isEmpty()) break
                     tracks = tracks + page.songs.filter { new -> tracks.none { it.mid == new.mid } }
-                    offset += pageSize
+                    val next = runCatching { page.advanceFrom(offset) }.getOrNull()
                     val t = total
-                    if (t != null && tracks.size >= t) break
-                    if (page.songs.size < pageSize) break
+                    if (next == null || (next <= offset && t != null && offset < t)) {
+                        failedAt = offset
+                        break
+                    }
+                    if (next <= offset || (t != null && next >= t)) break
+                    offset = next
+                    if (t == null && page.nextOffset == null && page.songs.size < pageSize) break
                 }
+                if (guard > 50) failedAt = offset
             }
             loaded = true
-            if (tracks.isNotEmpty()) TrackListCache.put(cacheKey, tracks, total)
+            if (tracks.isNotEmpty() && failedAt == null) TrackListCache.put(cacheKey, tracks, total)
             LikedStore.refresh()
         }
     }
@@ -259,13 +264,19 @@ fun TrackListScreen(
                 if (page == null) { failedAt = offset; break }
                 failedAt = null
                 total = page.total ?: total
-                if (page.songs.isEmpty()) break
                 tracks = tracks + page.songs.filter { new -> tracks.none { it.mid == new.mid } }
-                offset += pageSize
+                val next = runCatching { page.advanceFrom(offset) }.getOrNull()
                 val t = total
-                if (t != null && tracks.size >= t) break
-                if (page.songs.size < pageSize) break
+                if (next == null || (next <= offset && t != null && offset < t)) {
+                    failedAt = offset
+                    break
+                }
+                if (next <= offset || (t != null && next >= t)) break
+                offset = next
+                if (t == null && page.nextOffset == null && page.songs.size < pageSize) break
             }
+            if (guard > 50) failedAt = offset
+            if (tracks.isNotEmpty() && failedAt == null) TrackListCache.put(cacheKey, tracks, total)
         }
     }
 

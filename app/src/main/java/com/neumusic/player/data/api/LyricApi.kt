@@ -5,164 +5,47 @@ import com.neumusic.player.data.LyricWord
 import com.neumusic.player.data.Lyrics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * 歌词 + 翻译 + QRC 逐字 + 音译(roma) + 注音(kana)。
- *
- * ## 端点与参数
- * `musicu.fcg` 的 `music.musichallSong.PlayLyricInfo/GetPlayLyricInfo`，
- * param 必须显式带布尔开关：
- *
- * ```
- * { songMid, crypt: 0, lrc_t: 0,
- *   qrc: 1, qrc_t: 0,        // ← 逐字（要 1 才给 QRC）
- *   roma: 1, roma_t: 0,      // ← 音译/罗马音（逐字，hex QRC 密文；英文曲为空）
- *   trans: 1, trans_t: 0,    // ← 翻译（只传 trans_t 拿不到，必须传这个布尔）
- *   needSingingAnnotations: false, type: 1 }
- * ```
- *
- * ## 响应里 `lyric` 字段的两种形态（实测判别）
- * - **全 hex 字符** → QRC 逐字**密文**（hex 编码 → 非标准类 DES 三重 → zlib → 带 XML 壳的
- *   QRC 明文，见 [QrcCodec]）。此时行的每个字/词自带时间，渲染为卡拉 OK 扫色。
- * - **base64** → 行级 LRC 明文（该曲没有逐字数据时的普通响应）。
- *
- * ⚠️ 踩过的坑：`qrc=1` 后 `lyric` 变成 hex 密文，若仍按 base64 解会得到乱码，
- * `parseLrc` 找不到时间标签 → 整首歌显示「暂无歌词」。所以必须先判别 hex 再分流。
- *
- * ⚠️ **QRC 字时间是「绝对毫秒」，不是相对行首**：`[5670,5670]Lyrics(5670,378)…`——
- * 首字时间就等于行起点。一律按「相对行首」换算会把除第一行外每行的字时间推后一整个
- * 行起点，扫色恒为 0（「只有第一句有扫色」的根因）。详见 [parseQrcXml]。
- *
- * ## 翻译与注音
- * `trans` 是 base64 明文 LRC，无翻译的行是 `//` 占位，与原文同时间轴。
- * 日文曲的 `trans` 还带 **`[kana:1よね1づ1けん1し…]`** 注音元数据：
- * `<字符数><读音>` 交替，逐字对应主歌词——**只有汉字字符消费 token**（假名/拉丁/标点
- * 不消费，保留原字），token 流按行时间序贯穿整首歌（含 `词：/曲：` 元数据行，实测核过
- * Lemon 全曲对齐）。`[kana:…]` 因此能生成整行假名读音与逐字注音。
- *
- * ## 音译
- * `roma:1` 时 `roma` 字段是 hex QRC 密文（与 `lyric` 同格式），用 [QrcCodec] 解出
- * 逐字罗马音，按行起点对齐回主歌词行。英文曲该字段为空。
- *
- * ## 歌词优化（AMLL 同款策略，自研实现）
- * 1. 空格规范化：连续空格并成一个。
- * 2. 清洗非刻意重叠：与下一行重叠 ≥500ms 视为有意（保留）；<500ms 且（≤100ms 或
- *    ≤下一行时长 10%）→ 把上一行末字截到下一行起点，避免双行同时高亮。
- * 3. 让歌词提前开始：最多提前 600ms；距上一行结束不足 600ms 时提前 400ms；
- *    再不足 400ms 时提前剩余间隔的 70%。只提前行起点（高亮早到），字时间不动
- *    （扫色仍从唱到的那刻开始）——与 AMLL 观感一致。
- * 匿名 comm 即可取（实测），登录 comm 同样可用。
- */
+/** Rust fetches/decodes; the host keeps lyric rendering, alignment and display optimization. */
 object LyricApi {
-
     private const val NO_TRANS_PLACEHOLDER = "//"
-    private const val FCG = "https://u.y.qq.com/cgi-bin/musicu.fcg"
-
-    /** 同一 mid 的歌词在进程内缓存（切歌往返时避免重复请求）。 */
     private val cache = HashMap<String, Lyrics>()
     private const val CACHE_MAX = 24
+    fun clear() = synchronized(cache) { cache.clear() }
 
     suspend fun lyricsFor(mid: String): Lyrics? = withContext(Dispatchers.IO) {
         if (mid.isEmpty()) return@withContext null
         synchronized(cache) { cache[mid] }?.let { return@withContext it }
-        runCatching { fetch(mid) }
-            .getOrNull()
-            ?.also { lyrics ->
-                synchronized(cache) {
-                    if (cache.size >= CACHE_MAX) cache.clear()
-                    cache[mid] = lyrics
-                }
-            }
+        runCatching { fetch(mid) }.getOrNull()?.also { lyrics -> synchronized(cache) {
+            if (cache.size >= CACHE_MAX) cache.clear()
+            cache[mid] = lyrics
+        } }
     }
 
-    private fun fetch(mid: String): Lyrics? {
-        val data = call(mid, qrc = true) ?: return null
-        val rawLyric = data.optString("lyric", "")
-        if (rawLyric.isBlank()) return null
-
-        // ① hex → QRC 逐字；② 其余 → base64 明文 LRC 兜底。
-        var lines = if (looksLikeHex(rawLyric)) {
-            runCatching { parseQrcXml(QrcCodec.decryptHex(rawLyric)) }.getOrElse { emptyList() }
-        } else {
-            emptyList()
-        }
-        if (lines.isEmpty()) {
-            lines = parseLrc(decodeLrc(rawLyric))
-            if (lines.isEmpty()) return null
-        }
-
-        // 翻译：qrc=1 时通常为空，补一次行级请求（同一时间轴）合并。
-        var transRaw = data.optString("trans", "")
-        if (transRaw.isBlank() && lines.any { it.hasWords }) {
-            transRaw = runCatching { call(mid, qrc = false)?.optString("trans", "") ?: "" }
-                .getOrDefault("")
-        }
-        val transLines = if (transRaw.isBlank()) emptyList() else parseLrc(decodeLrc(transRaw))
-        val merged = mergeTranslation(lines, transLines)
-
-        // 音译（roma）：hex QRC 密文，同一解码器；为空（多数英文曲）就跳过。
-        val romaLines = data.optString("roma", "").takeIf { looksLikeHex(it) }
-            ?.let { runCatching { parseQrcXml(QrcCodec.decryptHex(it)) }.getOrElse { emptyList() } }
-            ?: emptyList()
-
-        // 注音（kana）：翻译 LRC 里的 [kana:…] 元数据 → 逐字假名。
-        val kanaTokens = parseKanaTokens(transRaw)
-
-        return Lyrics(optimize(attachRoman(attachKana(merged, kanaTokens), romaLines)))
+    private suspend fun fetch(mid: String): Lyrics? {
+        val response = HelperNext.call("fetch_lyric", JSONObject().put("songMid", mid).put("wordTiming", true).put("translation", true))
+        return fromComponent(response)
     }
 
-    /** 一次 GetPlayLyricInfo 请求，返回 `req_1.data`。 */
-    private fun call(mid: String, qrc: Boolean): JSONObject? {
-        val param = JSONObject()
-            .put("songMid", mid)
-            .put("crypt", 0)
-            .put("lrc_t", 0)
-            .put("qrc", if (qrc) 1 else 0)
-            .put("qrc_t", 0)
-            .put("roma", 1)
-            .put("roma_t", 0)
-            .put("trans", 1)
-            .put("trans_t", 0)
-            .put("needSingingAnnotations", false)
-            .put("type", 1)
-        val body = JSONObject()
-            .put("comm", JSONObject().put("ct", 19).put("cv", 1873))
-            .put("req_1", JSONObject()
-                .put("module", "music.musichallSong.PlayLyricInfo")
-                .put("method", "GetPlayLyricInfo")
-                .put("param", param))
-        val request = Request.Builder()
-            .url(FCG)
-            .header("Referer", "https://y.qq.com/")
-            .header("User-Agent", "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36")
-            .post(body.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
-            .build()
-        return QqCore.http.newCall(request).execute().use { resp ->
-            JSONObject(resp.body?.string() ?: "{}")
-                .optJSONObject("req_1")?.optJSONObject("data")
-        }
+    internal fun fromComponent(response: JSONObject): Lyrics? {
+        val lyric = response.getJSONObject("lyric")
+        val qrc = timedLines(lyric.optJSONArray("qrcLines"))
+        val lines = qrc.ifEmpty { parseLrc(lyric.text("lyric")) }
+        if (lines.isEmpty()) return null
+        val translation = lyric.text("translation")
+        val roman = timedLines(lyric.optJSONArray("romanLines")).ifEmpty { parseLrc(lyric.text("romanization")) }
+        return Lyrics(optimize(attachRoman(attachKana(mergeTranslation(lines, parseLrc(translation)),
+            parseKanaTokens(translation)), roman)))
     }
 
-    /** 是否纯 hex 文本（QRC 密文的特征）。加长度与等偶校验，避免误判普通 LRC。 */
-    private fun looksLikeHex(s: String): Boolean {
-        if (s.length < 32 || s.length % 2 != 0) return false
-        for (c in s) {
-            val hex = (c in '0'..'9') || (c in 'a'..'f') || (c in 'A'..'F')
-            if (!hex) return false
+    private fun timedLines(lines: JSONArray?): List<LyricLine> = lines.items { line ->
+        val words = line.optJSONArray("words").items { word ->
+            val start = word.getLong("startMs")
+            LyricWord(word.getString("text"), start, start + word.getLong("durationMs"))
         }
-        return true
-    }
-
-    /** 该端点返回 base64；已经明文的（异常情况）原样返回。 */
-    private fun decodeLrc(raw: String): String {
-        if (raw.isBlank()) return ""
-        return runCatching {
-            String(android.util.Base64.decode(raw, android.util.Base64.DEFAULT))
-        }.getOrElse { raw }
+        LyricLine(line.getLong("startMs"), words.joinToString("") { it.text }, words = words)
     }
 
     /** 按时间戳把翻译并到歌词行；`//` 占位行与对不上时间戳的（±300ms）忽略。 */
@@ -201,7 +84,7 @@ object LyricApi {
     /** 解析翻译 LRC 里的 `[kana:…]` 元数据；没有该标签（非日文曲）返回空表。 */
     private fun parseKanaTokens(transRaw: String): List<KanaToken> {
         if (transRaw.isBlank()) return emptyList()
-        val lrc = decodeLrc(transRaw)
+        val lrc = transRaw
         val body = KANA_TAG.find(lrc)?.groupValues?.get(1) ?: return emptyList()
         return KANA_TOKEN.findAll(body).map { m ->
             KanaToken(m.groupValues[1].toIntOrNull() ?: 1, m.groupValues[2])
@@ -352,66 +235,4 @@ object LyricApi {
         return out.sortedBy { it.timeMs }
     }
 
-    // ───────────────────────── QRC ─────────────────────────
-
-    private val CDATA_RE = Regex("""<!\[CDATA\[([\s\S]*?)\]\]>""")
-    private val ATTR_RE = Regex("""LyricContent="([^"]*)"""")
-    private val LINE_RE = Regex("""\[(\d+),(\d+)]([^\n]*)""")
-    private val WORD_RE = Regex("""\((\d+),(\d+)\)""")
-
-    /**
-     * 解析 QRC XML：取出 `LyricContent`（CDATA 或属性形式），逐行
-     * `[行起始,行时长]字(起,时长)字(起,时长)…` → 带逐字时间的 [LyricLine]。
-     *
-     * 元信息行（`[ti:]` 等，不含 `[数字,数字]`）自然被 LINE_RE 过滤掉。
-     *
-     * ⚠️ **字时间是绝对毫秒，不是相对行首**。实测（Five Hundred Miles）：
-     * 第 2 行是 `[5670,5670]Lyrics(5670,378) (6048,378)by(6426,378)…`——首字时间就是行起点
-     * 而非 0。早前一律按 `lineStart + 字偏移` 换算，于是**除第一行（lineStart=0）外**
-     * 每行的字时间都被推后一整个行起点，扫色计算判定成「还没唱」而恒为 0，
-     * 表现为「只有第一句歌词有扫色」。这里先判别基准（兼容相对时间的变体）再换算。
-     */
-    private fun parseQrcXml(xml: String): List<LyricLine> {
-        val content = CDATA_RE.find(xml)?.groupValues?.get(1)
-            ?: ATTR_RE.find(xml)?.groupValues?.get(1)
-            ?: return emptyList()
-        // 属性形式会做 XML 实体转义，反解回原文
-        val body = content
-            .replace("&lt;", "<").replace("&gt;", ">")
-            .replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&")
-
-        val out = ArrayList<LyricLine>()
-        for (m in LINE_RE.findAll(body)) {
-            val lineStart = m.groupValues[1].toLongOrNull() ?: continue
-            val lineDur = m.groupValues[2].toLongOrNull() ?: 0L
-            val payload = m.groupValues[3]
-
-            // 先原样收，再定基准。
-            val raw = ArrayList<QrcWord>()   // 时间含义待定的字（见下）
-            var idx = 0
-            while (idx < payload.length) {
-                val wm = WORD_RE.find(payload, idx) ?: break
-                val wordText = payload.substring(idx, wm.range.first)
-                val ws = wm.groupValues[1].toLongOrNull() ?: 0L
-                val wd = wm.groupValues[2].toLongOrNull() ?: 0L
-                if (wordText.isNotEmpty()) raw.add(QrcWord(wordText, ws, wd))
-                idx = wm.range.last + 1
-            }
-            if (raw.isEmpty()) continue
-            val text = raw.joinToString("") { it.text }.trim()
-            if (text.isEmpty()) continue
-
-            // 相对时间的行，字时间不会超出该行时长；超出即说明本来就是绝对时间。
-            val absolute = raw.maxOf { it.at + it.dur } > lineDur + 500L
-            val words = raw.map { w ->
-                val start = if (absolute) w.at else lineStart + w.at
-                LyricWord(w.text, start, start + w.dur)
-            }
-            out.add(LyricLine(timeMs = lineStart, text = text, words = words))
-        }
-        return out.sortedBy { it.timeMs }
-    }
-
-    /** QRC 原始字：`at`/`dur` 的含义（绝对或相对行首）由整行判别后确定。 */
-    private data class QrcWord(val text: String, val at: Long, val dur: Long)
 }

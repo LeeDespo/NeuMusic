@@ -45,7 +45,7 @@ NeuMusic 的核心目标是探索一件事：**在纯 Compose 里手写一套完
 # 产物：app/build/outputs/apk/debug/app-debug.apk
 ```
 
-或直接用 Android Studio（Ladybug 及以上）打开工程运行。最低支持 Android 8.0（API 26），面向 arm64。
+或直接用 Android Studio（Ladybug 及以上）打开工程运行。最低支持 Android 8.0（API 26），包含 arm64-v8a、armeabi-v7a、x86、x86_64。
 
 ## 致谢与参考
 
@@ -58,4 +58,6 @@ NeuMusic 的核心目标是探索一件事：**在纯 Compose 里手写一套完
 
 ## 许可
 
-License TBD —— 在明确的开源许可添加之前，仓库代码默认保留所有权利（All Rights Reserved），仅供浏览与学习，请勿再分发。第三方参考项目的许可（MIT / LGPL-3.0 / AGPL-3.0）如上所列，引用时以各自条款为准——其中 AGPL 项目仅作格式与思路研究，未复制任何代码。
+本项目以 GPL-3.0 开源，完整文本见 LICENSE。QQ 音乐访问使用嵌入式 [HelperNext](https://github.com/LeeDespo/QQMusicApi_HelperNext) Rust/BoltFFI 组件（GPL-3.0-or-later）；Kotlin/JNI 产物及来源校验记录位于 `app/helpernext/`。构建无需 Python 边车或常驻服务。生成或更新组件时运行 `HELPERNEXT_SOURCE=/path/to/QQMusicApi_HelperNext scripts/update-helpernext.sh`，常规 Android 构建直接使用仓库中的配套产物。
+
+Android 继续负责 Media3 播放、MediaStore 下载、文件命名、已下载台账与歌词渲染；组件负责在线接口、设备身份、凭据、限流和 QRC 解码。原 SharedPreferences 登录凭据首次启动会迁移到应用私有 `files/HelperNext/Credential/qqmusic-credential.json`，写入成功后删除旧副本。

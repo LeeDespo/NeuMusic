@@ -9,8 +9,7 @@ import kotlinx.coroutines.flow.StateFlow
  * 「我喜欢」的全局状态：一轮拉取后常驻内存，供任意列表行显示红心状态。
  *
  * 用 songId 集合做判定（写操作也用 songId，见 [SongApi.setLiked]）。
- * 收藏列表很长（几百首），一次拉 300 首足够覆盖列表里出现的曲目；
- * 超出范围的曲子会显示为未喜欢，这是刻意的取舍 —— 只在用户点红心时才真正写。
+ * 按实际返回数量推进偏移，直到已知总数或空页；失败的部分结果不标记为已加载。
  */
 object LikedStore {
     private val _liked = MutableStateFlow<Set<Long>>(emptySet())
@@ -18,8 +17,11 @@ object LikedStore {
 
     private val _loaded = MutableStateFlow(false)
 
+    private val lock = Any()
+    private val pendingMarks = mutableMapOf<Long, Boolean>()
     @Volatile
     private var loading = false
+    @Volatile private var generation = 0L
 
     /** 是否已成功拉取过一次。 */
     val loaded: StateFlow<Boolean> = _loaded
@@ -29,28 +31,31 @@ object LikedStore {
      * 未登录时静默跳过。
      */
     suspend fun refresh(force: Boolean = false) {
-        if (Prefs.credential?.euin.isNullOrEmpty()) return
-        if (loading) return
-        if (_loaded.value && !force) return
-        loading = true
-        // 翻页取全：喜欢状态必须准确，漏页会导致列表红心显示错误。
-        val ids = HashSet<Long>()
-        var offset = 0
-        var guard = 0
-        while (guard++ < 50) {
-            val page = runCatching { PlaylistApi.likedPage(offset, 300) }.getOrNull() ?: break
-            ids += page.songs.mapNotNull { it.songId.takeIf { id -> id > 0L } }
-            offset += 300
-            val t = page.total
-            if (page.songs.isEmpty()) break
-            if (t != null && ids.size >= t) break
-            if (page.songs.size < 300) break
+        val credential = Prefs.credential ?: return
+        val requestGeneration = synchronized(lock) {
+            if (loading || (_loaded.value && !force)) return
+            loading = true
+            pendingMarks.clear()
+            generation
         }
-        if (ids.isNotEmpty() || offset > 0) {
-            _liked.value = ids
-            _loaded.value = true
-        }
-        loading = false
+        try {
+            val accumulated = LikedPageAccumulator()
+            repeat(50) {
+                val page = runCatching { PlaylistApi.likedPage(accumulated.offset, 300) }.getOrNull() ?: return
+                if (requestGeneration != generation || Prefs.credential != credential) return
+                val complete = runCatching { accumulated.consume(page) }.getOrElse { return }
+                val ids = accumulated.ids
+                if (complete) {
+                    synchronized(lock) {
+                        if (requestGeneration != generation || Prefs.credential != credential) return
+                        pendingMarks.forEach { (id, liked) -> if (liked) ids.add(id) else ids.remove(id) }
+                        _liked.value = ids
+                        _loaded.value = true
+                    }
+                    return
+                }
+            }
+        } finally { synchronized(lock) { if (requestGeneration == generation) { loading = false; pendingMarks.clear() } } }
     }
 
     fun isLiked(songId: Long): Boolean = songId > 0L && _liked.value.contains(songId)
@@ -58,12 +63,36 @@ object LikedStore {
     /** 本地翻转（写接口成功后调用），避免为了刷新而再拉一次整表。 */
     fun mark(songId: Long, liked: Boolean) {
         if (songId <= 0L) return
-        _liked.value = if (liked) _liked.value + songId else _liked.value - songId
+        synchronized(lock) {
+            if (loading) pendingMarks[songId] = liked
+            _liked.value = if (liked) _liked.value + songId else _liked.value - songId
+        }
     }
 
     /** 退出登录时清空。 */
     fun clear() {
-        _liked.value = emptySet()
-        _loaded.value = false
+        synchronized(lock) {
+            generation++
+            loading = false
+            pendingMarks.clear()
+            _liked.value = emptySet()
+            _loaded.value = false
+        }
+    }
+}
+
+/** Tracks that cannot be normalized still consume positions in the upstream list. */
+internal class LikedPageAccumulator {
+    val ids = HashSet<Long>()
+    var offset = 0
+        private set
+
+    fun consume(page: PlaylistApi.Page): Boolean {
+        val next = page.advanceFrom(offset)
+        val complete = page.total?.let { next >= it } ?: (next == offset)
+        check(next > offset || complete) { "喜欢列表在总数边界前停止推进" }
+        ids += page.songs.mapNotNull { it.songId.takeIf { id -> id > 0 } }
+        offset = next
+        return complete
     }
 }

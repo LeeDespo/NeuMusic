@@ -17,9 +17,14 @@ android {
         versionName = "0.1.0"
 
         ndk {
-            // 本机模拟器是 arm64；只打这一种架构，APK 小、构建快。
-            abiFilters += listOf("arm64-v8a")
+            // Matching Rust/JNI artifacts are shipped for phones and both emulator architectures.
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
         }
+    }
+
+    sourceSets.getByName("main") {
+        java.srcDir("helpernext/kotlin")
+        jniLibs.srcDir("helpernext/jniLibs")
     }
 
     buildTypes {

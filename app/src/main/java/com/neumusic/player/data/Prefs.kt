@@ -5,16 +5,15 @@ import android.content.SharedPreferences
 import android.os.Environment
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.json.JSONObject
-import java.util.UUID
 
-/** 播放音质档位（对应 UrlGetVkey 的 filename 前缀，全部实测可取 purl）。 */
-enum class Quality(val label: String, val prefix: String, val ext: String) {
-    STANDARD("标准 128k", "M500", ".mp3"),
-    HQ("高品质 320k", "M800", ".mp3"),
-    AAC96("流畅 96k（AAC）", "C400", ".m4a"),
-    OGG192("高品质 192k（OGG）", "O600", ".ogg"),
-    OGG320("极高 320k（OGG）", "O800", ".ogg"),
-    FLAC("无损 FLAC", "F000", ".flac");
+/** 播放音质档位（由组件转换为对应文件类型，扩展名用于 Android 下载命名）。 */
+enum class Quality(val label: String, val ext: String) {
+    STANDARD("标准 128k", ".mp3"),
+    HQ("高品质 320k", ".mp3"),
+    AAC96("流畅 96k（AAC）", ".m4a"),
+    OGG192("高品质 192k（OGG）", ".ogg"),
+    OGG320("极高 320k（OGG）", ".ogg"),
+    FLAC("无损 FLAC", ".flac");
 
     companion object {
         fun of(name: String?): Quality = entries.firstOrNull { it.name == name } ?: STANDARD
@@ -69,7 +68,7 @@ enum class LightingMode(val label: String) {
 }
 
 /**
- * 轻量配置存取：登录凭据（uin + musickey + euin）、guid、音质、播放模式、
+ * 轻量配置存取：组件登录凭据、音质、播放模式、
  * 深色模式、立体感强度。
  *
  * 关于昵称：不持久化。登录后从 GetLoginUserInfo 拉取缓存于内存（见 [NicknameCache]）。
@@ -82,6 +81,7 @@ object Prefs {
 
     fun init(context: Context) {
         sp = context.getSharedPreferences("neumusic", Context.MODE_PRIVATE)
+        com.neumusic.player.data.api.HelperNext.init(context.applicationContext, sp)
         // 把磁盘里的持久值灌进响应式通道，供 UI 首帧就取到正确主题。
         themeFlow.value = themeMode
         accentFlow.value = accentMode
@@ -93,27 +93,6 @@ object Prefs {
         barVizFlow.value = barViz
         vinylModeFlow.value = vinylMode
     }
-
-    val guid: String
-        get() {
-            var g = sp.getString("guid", null)
-            if (g == null) {
-                g = UUID.randomUUID().toString().replace("-", "")
-                sp.edit().putString("guid", g).apply()
-            }
-            return g
-        }
-
-    /** 稳定的设备指纹字段（服务端接受自报的 QIMEI，无需真实置备）。 */
-    val qimei: String
-        get() {
-            var q = sp.getString("qimei", null)
-            if (q == null) {
-                q = UUID.randomUUID().toString().replace("-", "")
-                sp.edit().putString("qimei", q).apply()
-            }
-            return q
-        }
 
     var quality: Quality
         get() = Quality.of(sp.getString("quality", null))
@@ -375,25 +354,22 @@ object Prefs {
     val vinylModeFlow = MutableStateFlow(false)
 
     val credential: CredentialInfo?
-        get() {
-            val raw = sp.getString("credential", null) ?: return null
-            return runCatching {
-                val o = JSONObject(raw)
-                CredentialInfo(o.getString("uin"), o.getString("musickey"), o.optString("euin"))
-            }.getOrNull()
-        }
+        get() = com.neumusic.player.data.api.HelperNext.credential()
 
     fun saveCredential(info: CredentialInfo) {
-        sp.edit().putString("credential", JSONObject().apply {
-            put("uin", info.uin); put("musickey", info.musickey); put("euin", info.euin)
-        }.toString()).apply()
+        com.neumusic.player.data.api.HelperNext.saveCredential(info)
+        sp.edit().remove("credential").commit()
         NicknameCache.set(null)
+        com.neumusic.player.data.api.LyricApi.clear()
     }
 
     fun clearCredential() {
-        sp.edit().remove("credential").apply()
+        com.neumusic.player.data.api.HelperNext.clearCredential()
+        sp.edit().remove("credential").commit()
         NicknameCache.set(null)
+        com.neumusic.player.data.api.LyricApi.clear()
     }
+
 }
 
 data class CredentialInfo(val uin: String, val musickey: String, val euin: String = "")

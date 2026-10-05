@@ -134,21 +134,26 @@ fun SingerScreen(
 
     LaunchedEffect(kindAlbums, orderNew) {
         val st = store.getOrPut(apiOrder) { KeyedData() }
-        if (!st.loaded) {
+        if (!(if (kindAlbums) st.albumsLoaded else st.songsLoaded)) {
             try {
                 fetching = true
                 if (!kindAlbums) {
                     runCatching { SingerApi.songs(singer.mid, apiOrder, 0, 100) }.onSuccess { p ->
-                        st.songs = p.songs
+                        st.songs = p.songs.distinctBy { it.mid }
+                        st.songsOffset = p.advanceFrom(0)
                         p.total?.let { st.songsTotal = it }
-                        st.loaded = true
-                    }
+                        st.songsEnded = (st.songsOffset == 0 && st.songsTotal < 0)
+                            || (st.songsTotal >= 0 && st.songsOffset >= st.songsTotal)
+                        st.songsLoaded = true
+                        st.songsError = if (st.songsOffset == 0 && st.songsTotal > 0) "加载未完成，点此重试" else null
+                    }.onFailure { st.songsError = "加载失败，点此重试" }
                 } else {
                     runCatching { SingerApi.albums(singer.mid, apiOrder, 0, 30) }.onSuccess { p ->
                         st.albums = p.albums
                         p.total?.let { st.albumsTotal = it }
-                        st.loaded = true
-                    }
+                        st.albumsLoaded = true
+                        st.albumsError = null
+                    }.onFailure { st.albumsError = "加载失败，点此重试" }
                 }
             } finally {
                 fetching = false
@@ -163,13 +168,20 @@ fun SingerScreen(
             loadingMore = true
             try {
                 if (!kindAlbums) {
-                    if (st.songsTotal <= 0 || st.songs.size < st.songsTotal) {
-                        runCatching { SingerApi.songs(singer.mid, apiOrder, st.songs.size, 100) }.onSuccess { p ->
-                            if (p.songs.isNotEmpty()) {
-                                st.songs = st.songs + p.songs
-                                p.total?.let { st.songsTotal = it }
+                    if (!st.songsEnded && (st.songsTotal <= 0 || st.songsOffset < st.songsTotal)) {
+                        val offset = st.songsOffset
+                        runCatching { SingerApi.songs(singer.mid, apiOrder, offset, 100) }.onSuccess { p ->
+                            val next = p.advanceFrom(offset)
+                            if (next > offset) {
+                                st.songs = (st.songs + p.songs).distinctBy { it.mid }
+                                st.songsOffset = next
                             }
-                        }
+                            p.total?.let { st.songsTotal = it }
+                            st.songsEnded = (next == offset && st.songsTotal < 0)
+                                || (st.songsTotal >= 0 && next >= st.songsTotal)
+                            st.songsLoaded = true
+                            st.songsError = if (next == offset && st.songsTotal > offset) "加载未完成，点此重试" else null
+                        }.onFailure { st.songsError = "加载失败，点此重试" }
                     }
                 } else {
                     if (st.albumsTotal <= 0 || st.albums.size < st.albumsTotal) {
@@ -178,7 +190,9 @@ fun SingerScreen(
                                 st.albums = st.albums + p.albums
                                 p.total?.let { st.albumsTotal = it }
                             }
-                        }
+                            st.albumsLoaded = true
+                            st.albumsError = if (p.albums.isEmpty() && st.albumsTotal > st.albums.size) "加载未完成，点此重试" else null
+                        }.onFailure { st.albumsError = "加载失败，点此重试" }
                     }
                 }
             } finally {
@@ -278,7 +292,10 @@ fun SingerScreen(
                 }
                 !fetching && (if (kindAlbums) albums.isEmpty() else songs.isEmpty()) -> item(key = "state") {
                     Box(Modifier.fillMaxWidth().height(300.dp), contentAlignment = Alignment.Center) {
-                        Text(if (kindAlbums) "还没有专辑" else "还没有歌曲", color = colors.textTertiary, fontSize = 14.sp)
+                        val error = if (kindAlbums) cur?.albumsError else cur?.songsError
+                        Text(error ?: if (kindAlbums) "还没有专辑" else "还没有歌曲",
+                            color = if (error != null) colors.accent else colors.textTertiary, fontSize = 14.sp,
+                            modifier = if (error != null) Modifier.flatPressable(cornerRadius = 12.dp) { loadMore() }.padding(12.dp) else Modifier)
                     }
                 }
                 kindAlbums -> cardGridItems(
@@ -334,9 +351,11 @@ fun SingerScreen(
                             val total = if (kindAlbums) cur?.albumsTotal ?: -1 else cur?.songsTotal ?: -1
                             val loaded = if (kindAlbums) albums.size else songs.size
                             val unit = if (kindAlbums) "张" else "首"
+                            val error = if (kindAlbums) cur?.albumsError else cur?.songsError
                             Text(
-                                if (total > 0) "已加载 $loaded / 共 $total $unit" else "已加载 $loaded $unit",
-                                color = colors.textTertiary, fontSize = 12.sp,
+                                error ?: if (total > 0) "已加载 $loaded / 共 $total $unit" else "已加载 $loaded $unit",
+                                color = if (error != null) colors.accent else colors.textTertiary, fontSize = 12.sp,
+                                modifier = if (error != null) Modifier.flatPressable(cornerRadius = 12.dp) { loadMore() }.padding(12.dp) else Modifier,
                             )
                         }
                     }
@@ -396,7 +415,12 @@ private fun SegPair(options: List<String>, selected: Int, onSelect: (Int) -> Uni
 private class KeyedData {
     var songs by androidx.compose.runtime.mutableStateOf<List<Track>>(emptyList())
     var albums by androidx.compose.runtime.mutableStateOf<List<AlbumItem>>(emptyList())
+    var songsOffset by androidx.compose.runtime.mutableIntStateOf(0)
+    var songsEnded by androidx.compose.runtime.mutableStateOf(false)
     var songsTotal by androidx.compose.runtime.mutableIntStateOf(-1)
     var albumsTotal by androidx.compose.runtime.mutableIntStateOf(-1)
-    var loaded by androidx.compose.runtime.mutableStateOf(false)
+    var songsLoaded by androidx.compose.runtime.mutableStateOf(false)
+    var albumsLoaded by androidx.compose.runtime.mutableStateOf(false)
+    var songsError by androidx.compose.runtime.mutableStateOf<String?>(null)
+    var albumsError by androidx.compose.runtime.mutableStateOf<String?>(null)
 }

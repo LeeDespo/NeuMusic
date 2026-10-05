@@ -175,7 +175,7 @@ fun HomeScreen(
     }
 
     LaunchedEffect(Unit) {
-        val logged = Prefs.credential != null
+        val requestCredential = Prefs.credential
 
         // ── 1) 磁盘快照立即上屏（冷启动不再白屏等网络）──
         HomeCache.playlists()?.let { playlists = it }
@@ -188,6 +188,7 @@ fun HomeScreen(
         scope.launch {
             runCatching { ApiCache.getOrPut("favPlaylists") { PlaylistApi.favPlaylists() } }
                 .onSuccess {
+                    if (Prefs.credential != requestCredential) return@onSuccess
                     playlists = it
                     HomeCache.savePlaylists(it)
                 }
@@ -196,6 +197,7 @@ fun HomeScreen(
         scope.launch {
             runCatching { ApiCache.getOrPut("favAlbums") { PlaylistApi.favAlbums() } }
                 .onSuccess {
+                    if (Prefs.credential != requestCredential) return@onSuccess
                     albums = it
                     albumsLoaded = true
                     HomeCache.saveAlbums(it)
@@ -205,6 +207,7 @@ fun HomeScreen(
         scope.launch {
             runCatching { ApiCache.getOrPut("radioGroups") { RadioApi.groups() } }
                 .onSuccess {
+                    if (Prefs.credential != requestCredential) return@onSuccess
                     radioGroups = it
                     radioLoaded = true
                     HomeCache.saveRadioGroups(it)
@@ -221,13 +224,12 @@ fun HomeScreen(
             .firstOrNull { st -> st.title == "猜你喜欢" }
         if (station != null) RecommendStore.stationId = station.id
 
-        // ── 3.5) 关注的歌手（需登录 + euin）──
+        // ── 3.5) 关注的歌手（组件按需解析账号标识）──
         scope.launch {
-            followedSingers = if (Prefs.credential?.euin?.isNotEmpty() == true) {
+            val fetched = if (requestCredential != null) {
                 runCatching { UserApi.followSingers(0, 30).first }.getOrDefault(emptyList())
-            } else {
-                emptyList()
-            }
+            } else emptyList()
+            if (Prefs.credential == requestCredential) followedSingers = fetched
         }
 
         // ── 4) 我喜欢全量刷新与数量（放最后，不跟三栏抢首批请求）──
@@ -235,6 +237,7 @@ fun HomeScreen(
         scope.launch {
             runCatching { ApiCache.getOrPut("likedCount") { PlaylistApi.likedPage(0, 1).total } }
                 .getOrNull()?.let { c ->
+                    if (Prefs.credential != requestCredential) return@let
                     likedCount = c
                     HomeCache.saveLikedCount(c)
                 }

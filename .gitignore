@@ -32,3 +32,6 @@ CLAUDE.md
 
 # 已删除的旧边车目录残留
 qqmusic-service/
+
+# Local Rust component reconstruction for binding updates
+.helpernext-build/

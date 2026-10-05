@@ -1,5 +1,7 @@
 package com.neumusic.player.data.api
 
+import com.neumusic.player.data.CredentialInfo
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -15,30 +17,35 @@ import kotlinx.coroutines.sync.withLock
  * 注意：只缓存**幂等读**；写操作与凭据相关请求一律不进缓存。
  */
 object ApiCache {
-    private class Entry(val value: Any, val atMs: Long)
+    private class Entry(val value: Any?, val atMs: Long, val credential: CredentialInfo?)
 
     private const val DEFAULT_TTL_MS = 5 * 60_000L
     private const val MAX_ENTRIES = 32
 
     private val mutex = Mutex()
+    private var generation = 0L
     private val map = LinkedHashMap<String, Entry>(16, 0.75f, true)
 
     suspend fun <T> getOrPut(key: String, ttlMs: Long = DEFAULT_TTL_MS, loader: suspend () -> T): T {
-        mutex.withLock {
+        val credential = HelperNext.credential()
+        val requestGeneration = mutex.withLock {
             val e = map[key]
-            if (e != null && System.currentTimeMillis() - e.atMs < ttlMs) {
+            if (e != null && e.credential == credential && System.currentTimeMillis() - e.atMs < ttlMs) {
                 @Suppress("UNCHECKED_CAST")
                 return e.value as T
             }
+            generation
         }
         // 加载放在锁外，避免慢请求把其它缓存读写全堵住。
         val v = loader()
         mutex.withLock {
+            if (generation != requestGeneration || HelperNext.credential() != credential)
+                throw CancellationException("账号或缓存已失效")
             if (map.size >= MAX_ENTRIES) {
                 val eldest = map.keys.firstOrNull()
                 if (eldest != null) map.remove(eldest)
             }
-            map[key] = Entry(v as Any, System.currentTimeMillis())
+            map[key] = Entry(v, System.currentTimeMillis(), credential)
         }
         return v
     }
@@ -46,11 +53,12 @@ object ApiCache {
     /** 主动失效（退出登录等场景）。 */
     suspend fun invalidate(prefix: String) {
         mutex.withLock {
+            generation++
             map.keys.removeAll { it.startsWith(prefix) }
         }
     }
 
     suspend fun clear() {
-        mutex.withLock { map.clear() }
+        mutex.withLock { generation++; map.clear() }
     }
 }

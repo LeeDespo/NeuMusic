@@ -126,6 +126,10 @@ fun SettingsScreen(onBack: () -> Unit) {
             onLoggedIn = {
                 showWebLogin = false
                 cred = Prefs.credential
+                scope.launch { ApiCache.clear() }
+                LikedStore.clear()
+                HomeCache.clear()
+                com.neumusic.player.ui.home.TrackListCache.clear()
             },
         )
         return
@@ -188,7 +192,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                             fontSize = 15.sp, color = colors.textPrimary, fontWeight = FontWeight.Medium,
                         )
                         Text(
-                            if (cred?.euin.isNullOrEmpty()) "登录后同步我喜欢 / 歌单 / 专辑" else "凭据完整，可读取全部收藏",
+                            if (cred == null) "登录后同步我喜欢 / 歌单 / 专辑" else "登录凭据由 HelperNext 管理",
                             fontSize = 12.sp, color = colors.textSecondary,
                         )
                     }
@@ -839,9 +843,7 @@ private fun WebLoginOverlay(onClose: () -> Unit, onLoggedIn: () -> Unit) {
                         scope.launch { NicknameCache.set(runCatching { UserApi.nickname() }.getOrNull()) }
                         toastMain(
                             context,
-                            if (euin.isEmpty())
-                                "已登录（缺 euin，收藏列表可能不可用；建议重新登录一次）"
-                            else "登录成功",
+                            "登录成功",
                         )
                         onLoggedIn()
                     }
