@@ -118,7 +118,6 @@ object HomeCache {
                     val st = RadioStation(
                         id = o.optInt("id"),
                         title = o.optString("title"),
-                        listenDesc = o.optString("listenDesc"),
                         picUrl = o.optString("picUrl"),
                     )
                     if (st.id > 0) stations.add(st)
@@ -138,7 +137,7 @@ object HomeCache {
                     JSONArray().apply {
                         g.stations.forEach { s ->
                             put(JSONObject().put("id", s.id).put("title", s.title)
-                                .put("listenDesc", s.listenDesc).put("picUrl", s.picUrl))
+                                .put("picUrl", s.picUrl))
                         }
                     },
                 ))

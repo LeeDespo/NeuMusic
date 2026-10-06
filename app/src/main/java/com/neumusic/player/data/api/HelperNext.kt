@@ -109,7 +109,6 @@ internal fun HelperError.userMessage(): String = when (this) {
 }
 
 internal fun JSONObject.text(key: String): String = if (isNull(key)) "" else optString(key)
-internal fun JSONObject.total(): Int? = if (isNull("total") || !has("total")) null else optInt("total").takeIf { it >= 0 }
 internal inline fun <T> JSONArray?.items(transform: (JSONObject) -> T?): List<T> =
     if (this == null) emptyList() else (0 until length()).mapNotNull { optJSONObject(it)?.let(transform) }
 internal fun String.toHttps(): String = when {

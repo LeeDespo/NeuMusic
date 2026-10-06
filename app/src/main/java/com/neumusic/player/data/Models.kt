@@ -32,7 +32,6 @@ data class RadioGroup(val title: String, val stations: List<RadioStation>)
 data class RadioStation(
     val id: Int,
     val title: String,
-    val listenDesc: String,
     val picUrl: String,
 )
 

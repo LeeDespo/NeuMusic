@@ -1,19 +1,26 @@
 package com.neumusic.player.data.api
 
+import com.example.qqmusic_api_helper_next.HelperError
+import com.example.qqmusic_api_helper_next.radioStations
+import com.example.qqmusic_api_helper_next.radioTrackBatch
 import com.neumusic.player.data.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.CancellationException
-import org.json.JSONObject
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
+/**
+ * 电台 typed 消费：分组展示与无限轮换批次。组件 radioTrackBatch 每次给一批全新轮换
+ * （旧 raw 显式带的 batches/excludeMids 组件本就不读）；跨批去重、失败容忍是宿主产品策略。
+ */
 object RadioApi {
-    suspend fun groups(): List<RadioGroup> = HelperNext.call("fetch_radio_stations").optJSONArray("radioGroups").items { g ->
-        RadioGroup(g.text("title"), g.optJSONArray("stations").items { s ->
-            RadioStation(s.optInt("id"), s.text("title"), s.text("listenDesc"), s.text("coverURL").toHttps())
-        })
+    private suspend fun <T> call(block: () -> T): T = withContext(Dispatchers.IO) {
+        try { block() } catch (error: HelperError) { throw IllegalStateException(error.userMessage(), error) }
     }
-    private suspend fun batch(radioId: Int, firstplay: Boolean): List<Track> = HelperNext.call(
-        "fetch_radio_track_batch", JSONObject().put("stationId", radioId).put("firstPlay", firstplay)
-            .put("batches", 1).put("excludeMids", org.json.JSONArray())).optJSONArray("tracks").items(QqMapper::track)
+    suspend fun groups(): List<RadioGroup> = call { radioStations().map(QqMapper::radioGroup) }
+    private suspend fun batch(radioId: Int, firstplay: Boolean): List<Track> = call {
+        radioTrackBatch(radioId.toLong(), firstplay).tracks.mapNotNull(QqMapper::track)
+    }
     suspend fun nextTracks(radioId: Int, firstplay: Boolean, exclude: Set<String>, batches: Int = 4): List<Track> {
         val acc = LinkedHashMap<String, Track>()
         var ok = 0

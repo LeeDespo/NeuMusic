@@ -1,41 +1,68 @@
 package com.neumusic.player.data.api
 
 import com.example.qqmusic_api_helper_next.Album as ComponentAlbum
+import com.example.qqmusic_api_helper_next.AlbumPage as ComponentAlbumPage
 import com.example.qqmusic_api_helper_next.Artist as ComponentArtist
 import com.example.qqmusic_api_helper_next.Playlist as ComponentPlaylist
+import com.example.qqmusic_api_helper_next.RadioGroup as ComponentRadioGroup
+import com.example.qqmusic_api_helper_next.RadioStation as ComponentRadioStation
 import com.example.qqmusic_api_helper_next.Singer as ComponentSinger
 import com.example.qqmusic_api_helper_next.Track as ComponentTrack
-import com.example.qqmusic_api_helper_next.TrackFileSize as ComponentTrackFileSize
+import com.example.qqmusic_api_helper_next.TrackPage as ComponentTrackPage
+import com.example.qqmusic_api_helper_next.UserFavAlbumItem
+import com.example.qqmusic_api_helper_next.UserFavSonglistItem
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 
 class HelperNextMappingTest {
-    @Test fun trackKeepsMediaIdentityFormatSizesGenreAndMultipleSingers() {
-        val t = QqMapper.track(JSONObject("""{"songMid":"song","mediaMid":"media","title":"<em>Title</em>",
-            "singers":[{"name":"A"},{"name":"B"}],"album":"Album","albumMid":"album",
-            "songId":123,"genre":34,"duration":211,"payPlay":1,
-            "fileSizes":[{"name":"128mp3","bytes":1200},{"name":"320ogg","bytes":5000}]}"""))!!
-        assertEquals("media", t.mediaMid); assertEquals("A / B", t.singer)
+    /** 最小 typed 曲目（16 参全给，便于各用例裁剪）。 */
+    private fun componentTrack(mid: String) = ComponentTrack(123L, mid, null, "T", "A", null, null, null,
+        null, null, null, null, null, null, null, emptyList())
+    private fun componentAlbum(mid: String?) = ComponentAlbum(1L, "专辑", mid, "//y.gtimg.cn/p.jpg", "歌手", null, 7L)
+
+    @Test fun typedTrackMirrorsRawMappingSemantics() {
+        val t = QqMapper.track(ComponentTrack(123L, "song", "media", "<em>Title</em>", "A, B",
+            "Album", "album", 9L, null, 211L, 1L, null,
+            listOf(ComponentSinger("a", "A"), ComponentSinger("b", ""), ComponentSinger("c", null)),
+            null, 34L, listOf(com.example.qqmusic_api_helper_next.TrackFileSize("128mp3", 1200L),
+                com.example.qqmusic_api_helper_next.TrackFileSize("320ogg", 5000L))))!!
+        assertEquals("media", t.mediaMid); assertEquals("A", t.singer)
         assertEquals("Title", t.name); assertEquals(34, t.genre)
         assertEquals(5000L, t.fileSizes["320ogg"]); assertEquals(123L, t.songId)
         assertTrue(t.isVip)
     }
+    @Test fun typedTrackFallsBackWhenFieldsMissing() {
+        assertNull(QqMapper.track(componentTrack("")))
+        val t = QqMapper.track(componentTrack("song"))!!
+        assertEquals("song", t.mediaMid)   // mediaMid 缺省回退 mid
+        assertEquals("A", t.singer)        // singers 缺省时用组件 artist 串
+        assertEquals("", t.albumName)
+        assertFalse(t.isVip); assertEquals(123L, t.songId); assertEquals(0, t.genre)
+        assertEquals(0, t.intervalSec); assertTrue(t.fileSizes.isEmpty())
+    }
     @Test fun missingTotalStaysUnknownWhileExplicitZeroSurvives() {
-        assertNull(PlaylistApi.page(JSONObject("""{"tracks":[],"total":null}""")).total)
-        assertEquals(0, PlaylistApi.page(JSONObject("""{"tracks":[],"total":0}""")).total)
+        assertNull(PlaylistApi.page(ComponentTrackPage(emptyList(), null, null)).total)
+        assertEquals(0, PlaylistApi.page(ComponentTrackPage(emptyList(), 0L, null)).total)
+    }
+    @Test fun typedTrackPagePrefersServerOffsetAndFiltersMidlessRows() {
+        // nextOffset 是原始行偏移（无 MID 畸形行占位但被组件省略），优先于本页行数推进。
+        val page = PlaylistApi.page(ComponentTrackPage(listOf(componentTrack(""), componentTrack("m1")), 5L, 7L))
+        assertEquals(listOf("m1"), page.songs.map { it.mid })
+        assertEquals(5, page.total)
+        assertEquals(7, page.advanceFrom(0))
     }
     @Test fun artistAlbumPagePrefersServerOffsetOverFilteredCount() {
-        // 组件回传 nextOffset 时按它推进；无 albumMid 的行被过滤但已占上游位置。
-        val page = SingerApi.albumPage(JSONObject("""{"albums":[{"albumMid":"a"},{"title":"no-mid"}],
-            "total":100,"nextOffset":30}"""))
+        // 组件回传 nextOffset 时按它推进；无 mid 行被组件省略但已占上游位置。
+        val page = SingerApi.albumPage(ComponentAlbumPage(listOf(componentAlbum("a"), componentAlbum(null)), 100L, 30L))
         assertEquals(1, page.albums.size)
         assertEquals(30, page.advanceFrom(0))
     }
-    @Test fun artistAlbumPageFallsBackToRawRowsAndIgnoresNegativeOffset() {
-        val without = SingerApi.albumPage(JSONObject("""{"albums":[{"albumMid":"a"},{"title":"no-mid"}],"total":100}"""))
-        assertEquals(2, without.advanceFrom(0))
-        assertNull(SingerApi.albumPage(JSONObject("""{"albums":[],"nextOffset":-1}""")).nextOffset)
+    @Test fun artistAlbumPageFallsBackToRowCountAndIgnoresNegativeOffset() {
+        // 防御回退按本页行数（typed 模型不再暴露 raw 行数；现行端点恒回传 nextOffset）。
+        val without = SingerApi.albumPage(ComponentAlbumPage(listOf(componentAlbum("a")), 100L, null))
+        assertEquals(1, without.advanceFrom(0))
+        assertNull(SingerApi.albumPage(ComponentAlbumPage(emptyList(), null, -1L)).nextOffset)
     }
     @Test fun artistAlbumAdvanceNeverGoesBackwards() {
         val page = SingerApi.AlbumPage(emptyList(), 100, nextOffset = 5)
@@ -53,32 +80,7 @@ class HelperNextMappingTest {
         assertEquals("ゆめ", line.words.single().kana)
         assertTrue(lyrics.hasWordTiming); assertTrue(lyrics.hasRoman); assertTrue(lyrics.hasKana)
     }
-    @Test fun literalNullStringsDontLeakIntoUi() {
-        val t = QqMapper.track(JSONObject("""{"songMid":"m","title":null,"album":null,"albumMid":null,"artist":"artist"}"""))!!
-        assertEquals("", t.name); assertEquals("", t.albumName); assertEquals("m", t.mediaMid)
-    }
 
-    @Test fun typedSearchTrackMirrorsRawMappingSemantics() {
-        val t = QqMapper.track(ComponentTrack(123L, "song", "media", "<em>Title</em>", "A, B",
-            "Album", "album", 9L, null, 211L, 1L, null,
-            listOf(ComponentSinger("a", "A"), ComponentSinger("b", ""), ComponentSinger("c", null)),
-            null, 34L, listOf(ComponentTrackFileSize("128mp3", 1200L), ComponentTrackFileSize("320ogg", 5000L))))!!
-        assertEquals("media", t.mediaMid); assertEquals("A", t.singer)
-        assertEquals("Title", t.name); assertEquals(34, t.genre)
-        assertEquals(5000L, t.fileSizes["320ogg"]); assertEquals(123L, t.songId)
-        assertTrue(t.isVip)
-    }
-    @Test fun typedSearchTrackFallsBackLikeRawWhenFieldsMissing() {
-        assertNull(QqMapper.track(ComponentTrack(null, "", null, "T", "A", null, null, null,
-            null, null, null, null, null, null, null, emptyList())))
-        val t = QqMapper.track(ComponentTrack(null, "song", null, "T", "A, B", null, null, null,
-            null, null, null, null, null, null, null, emptyList()))!!
-        assertEquals("song", t.mediaMid)   // mediaMid 缺省回退 mid
-        assertEquals("A, B", t.singer)     // singers 缺省时用组件 artist 串
-        assertEquals("", t.albumName)
-        assertFalse(t.isVip); assertEquals(0L, t.songId); assertEquals(0, t.genre)
-        assertEquals(0, t.intervalSec); assertTrue(t.fileSizes.isEmpty())
-    }
     @Test fun typedSearchArtistAlbumPlaylistKeepHighlightCleanAndHttps() {
         val a = QqMapper.artist(ComponentArtist("mid", "<em>周</em>杰", "http://y.gtimg.cn/x.jpg", 10L, 5L, null))
         assertEquals("周杰", a.name); assertEquals("https://y.gtimg.cn/x.jpg", a.pic)
@@ -91,5 +93,33 @@ class HelperNextMappingTest {
         val p = QqMapper.playlist(ComponentPlaylist(42L, "<em>歌单</em>", "http://qpic.y.qq.com/x", null, 9L, null))
         assertEquals(42L, p.tid); assertEquals("歌单", p.name)
         assertEquals("https://qpic.y.qq.com/x", p.logo); assertEquals(9, p.songnum)
+    }
+
+    @Test fun favPlaylistKeepsHttpsLogoAndCounts() {
+        val p = QqMapper.favPlaylist(UserFavSonglistItem(42L, null, "歌单", "http://qpic.y.qq.com/x",
+            null, 9L, null, null, null, null, null, null, null, null, null, null, null, null, null, null))
+        assertEquals(42L, p.tid); assertEquals("歌单", p.name)
+        assertEquals("https://qpic.y.qq.com/x", p.logo); assertEquals(9, p.songnum)
+    }
+    @Test fun favAlbumBuildsCoverFromPmidAndFallsBackToMid() {
+        // typed 收藏专辑只给 pmid：封面沿用宿主 pmid → y.gtimg.cn 拼接；pmid 空回退 mid。
+        val album = QqMapper.favAlbum(UserFavAlbumItem(1L, "albumMid", "", "标题", null, null,
+            "pmid1", 9L, null, null, null, null, null))!!
+        assertEquals("albumMid", album.mid)
+        assertEquals("标题", album.name)   // name 空回退 title
+        assertEquals("https://y.gtimg.cn/music/photo_new/T002R300x300M000pmid1.jpg", album.logo)
+        assertEquals(9, album.songnum)
+        val fallback = QqMapper.favAlbum(UserFavAlbumItem(1L, "mid2", "名", null, null, null,
+            null, null, null, null, null, null, null))!!
+        assertEquals("https://y.gtimg.cn/music/photo_new/T002R300x300M000mid2.jpg", fallback.logo)
+        assertNull(QqMapper.favAlbum(UserFavAlbumItem(1L, "", "名", null, null, null,
+            null, null, null, null, null, null, null)))   // 无 mid 行不可用
+    }
+    @Test fun radioGroupNarrowsStationIdToHostIntAndHttps() {
+        val g = QqMapper.radioGroup(ComponentRadioGroup("热门",
+            listOf(ComponentRadioStation(106L, "电台", "http://y.gtimg.cn/x.jpg"))))
+        assertEquals("热门", g.title)
+        assertEquals(106, g.stations.single().id)
+        assertEquals("https://y.gtimg.cn/x.jpg", g.stations.single().picUrl)
     }
 }
