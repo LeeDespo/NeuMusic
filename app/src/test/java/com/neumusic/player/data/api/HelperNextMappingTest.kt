@@ -3,7 +3,10 @@ package com.neumusic.player.data.api
 import com.example.qqmusic_api_helper_next.Album as ComponentAlbum
 import com.example.qqmusic_api_helper_next.AlbumPage as ComponentAlbumPage
 import com.example.qqmusic_api_helper_next.Artist as ComponentArtist
+import com.example.qqmusic_api_helper_next.Lyric as ComponentLyric
 import com.example.qqmusic_api_helper_next.Playlist as ComponentPlaylist
+import com.example.qqmusic_api_helper_next.QrcLine as ComponentQrcLine
+import com.example.qqmusic_api_helper_next.QrcWord as ComponentQrcWord
 import com.example.qqmusic_api_helper_next.RadioGroup as ComponentRadioGroup
 import com.example.qqmusic_api_helper_next.RadioStation as ComponentRadioStation
 import com.example.qqmusic_api_helper_next.Singer as ComponentSinger
@@ -11,7 +14,6 @@ import com.example.qqmusic_api_helper_next.Track as ComponentTrack
 import com.example.qqmusic_api_helper_next.TrackPage as ComponentTrackPage
 import com.example.qqmusic_api_helper_next.UserFavAlbumItem
 import com.example.qqmusic_api_helper_next.UserFavSonglistItem
-import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -69,10 +71,10 @@ class HelperNextMappingTest {
         assertThrows(IllegalStateException::class.java) { page.advanceFrom(10) }
     }
     @Test fun lyricsKeepExactMillisecondsDurationAndPlainKanaMetadata() {
-        val lyrics = LyricApi.fromComponent(JSONObject("""{"lyric":{"lyric":"[00:01.001]原文",
-            "translation":"[kana:1ゆめ]\n[00:01.001]翻译",
-            "qrcLines":[{"startMs":1001,"durationMs":399,"words":[{"text":"夢","startMs":1001,"durationMs":399}]}],
-            "romanLines":[{"startMs":1001,"durationMs":399,"words":[{"text":"yume","startMs":1001,"durationMs":399}]}]}}"""))!!
+        val lyrics = LyricApi.fromComponent(ComponentLyric("[00:01.001]原文",
+            "[kana:1ゆめ]\n[00:01.001]翻译", null, null,
+            listOf(ComponentQrcLine(1001L, 399L, listOf(ComponentQrcWord("夢", 1001L, 399L)))),
+            listOf(ComponentQrcLine(1001L, 399L, listOf(ComponentQrcWord("yume", 1001L, 399L))))))!!
         val line = lyrics.lines.single()
         assertEquals(1001L, line.words.single().startMs)
         assertEquals(1400L, line.words.single().endMs)

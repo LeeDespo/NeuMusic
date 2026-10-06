@@ -1,12 +1,13 @@
 package com.neumusic.player.data.api
 
+import com.example.qqmusic_api_helper_next.Lyric as ComponentLyric
+import com.example.qqmusic_api_helper_next.QrcLine
+import com.example.qqmusic_api_helper_next.lyric
 import com.neumusic.player.data.LyricLine
 import com.neumusic.player.data.LyricWord
 import com.neumusic.player.data.Lyrics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
-import org.json.JSONObject
 
 /** Rust fetches/decodes; the host keeps lyric rendering, alignment and display optimization. */
 object LyricApi {
@@ -24,28 +25,23 @@ object LyricApi {
         } }
     }
 
-    private suspend fun fetch(mid: String): Lyrics? {
-        val response = HelperNext.call("fetch_lyric", JSONObject().put("songMid", mid).put("wordTiming", true).put("translation", true))
-        return fromComponent(response)
-    }
+    private suspend fun fetch(mid: String): Lyrics? = fromComponent(lyric(mid, null, true, true))
 
-    internal fun fromComponent(response: JSONObject): Lyrics? {
-        val lyric = response.getJSONObject("lyric")
-        val qrc = timedLines(lyric.optJSONArray("qrcLines"))
-        val lines = qrc.ifEmpty { parseLrc(lyric.text("lyric")) }
+    internal fun fromComponent(component: ComponentLyric): Lyrics? {
+        val qrc = timedLines(component.qrcLines)
+        val lines = qrc.ifEmpty { parseLrc(component.lyric.orEmpty()) }
         if (lines.isEmpty()) return null
-        val translation = lyric.text("translation")
-        val roman = timedLines(lyric.optJSONArray("romanLines")).ifEmpty { parseLrc(lyric.text("romanization")) }
+        val translation = component.translation.orEmpty()
+        val roman = timedLines(component.romanLines).ifEmpty { parseLrc(component.romanization.orEmpty()) }
         return Lyrics(optimize(attachRoman(attachKana(mergeTranslation(lines, parseLrc(translation)),
             parseKanaTokens(translation)), roman)))
     }
 
-    private fun timedLines(lines: JSONArray?): List<LyricLine> = lines.items { line ->
-        val words = line.optJSONArray("words").items { word ->
-            val start = word.getLong("startMs")
-            LyricWord(word.getString("text"), start, start + word.getLong("durationMs"))
+    private fun timedLines(lines: List<QrcLine>?): List<LyricLine> = lines.orEmpty().map { line ->
+        val words = line.words.map { word ->
+            LyricWord(word.text, word.startMs, word.startMs + word.durationMs)
         }
-        LyricLine(line.getLong("startMs"), words.joinToString("") { it.text }, words = words)
+        LyricLine(line.startMs, words.joinToString("") { it.text }, words = words)
     }
 
     /** 按时间戳把翻译并到歌词行；`//` 占位行与对不上时间戳的（±300ms）忽略。 */
