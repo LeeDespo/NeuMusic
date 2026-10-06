@@ -3,6 +3,8 @@ package com.neumusic.player.data.api
 import com.example.qqmusic_api_helper_next.Album as ComponentAlbum
 import com.example.qqmusic_api_helper_next.AlbumPage as ComponentAlbumPage
 import com.example.qqmusic_api_helper_next.Artist as ComponentArtist
+import com.example.qqmusic_api_helper_next.GetFavNumResponse
+import com.example.qqmusic_api_helper_next.LikeReceipt
 import com.example.qqmusic_api_helper_next.Lyric as ComponentLyric
 import com.example.qqmusic_api_helper_next.Playlist as ComponentPlaylist
 import com.example.qqmusic_api_helper_next.QrcLine as ComponentQrcLine
@@ -10,10 +12,13 @@ import com.example.qqmusic_api_helper_next.QrcWord as ComponentQrcWord
 import com.example.qqmusic_api_helper_next.RadioGroup as ComponentRadioGroup
 import com.example.qqmusic_api_helper_next.RadioStation as ComponentRadioStation
 import com.example.qqmusic_api_helper_next.Singer as ComponentSinger
+import com.example.qqmusic_api_helper_next.SongDetail
 import com.example.qqmusic_api_helper_next.Track as ComponentTrack
 import com.example.qqmusic_api_helper_next.TrackPage as ComponentTrackPage
+import com.example.qqmusic_api_helper_next.UrlinfoItem
 import com.example.qqmusic_api_helper_next.UserFavAlbumItem
 import com.example.qqmusic_api_helper_next.UserFavSonglistItem
+import com.neumusic.player.data.Quality
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -123,5 +128,60 @@ class HelperNextMappingTest {
         assertEquals("热门", g.title)
         assertEquals(106, g.stations.single().id)
         assertEquals("https://y.gtimg.cn/x.jpg", g.stations.single().picUrl)
+    }
+
+    @Test fun songQualityMapsCoverAllSixTiersWithoutClash() {
+        val fileTypes = Quality.entries.associateWith(SongApi::format)
+        val sizeKeys = Quality.entries.associateWith(SongApi::sizeKey)
+        // 六档各配一个 file_type（组件枚举成员名）与 fileSizes 键，互不重复。
+        assertEquals(setOf("MP3_128", "MP3_320", "ACC_96", "OGG_192", "OGG_320", "FLAC"), fileTypes.values.toSet())
+        assertEquals(setOf("128mp3", "320mp3", "96aac", "192ogg", "320ogg", "flac"), sizeKeys.values.toSet())
+        assertEquals(6, fileTypes.size); assertEquals(6, sizeKeys.size)
+    }
+
+    @Test fun playUrlChainPrefersRequestedTierThenSkipsMissingSizes() {
+        // 无 fileSizes（落盘推荐曲目冷启动）走全档位分支，请求档仍在最前。
+        assertEquals(listOf(Quality.FLAC, Quality.STANDARD, Quality.HQ, Quality.AAC96,
+            Quality.OGG192, Quality.OGG320), SongApi.chain(Quality.FLAC, emptyMap()))
+        // 有 fileSizes 时只保留有大小的档位，请求档最前、其余按枚举序。
+        val sizes = mapOf("128mp3" to 1L, "320ogg" to 2L)
+        assertEquals(listOf(Quality.OGG320, Quality.STANDARD), SongApi.chain(Quality.OGG320, sizes))
+        // 全被滤空回退标准档。
+        assertEquals(listOf(Quality.STANDARD), SongApi.chain(Quality.FLAC, mapOf("128mp3" to 0L)))
+    }
+
+    @Test fun typedPurlJoinsIsureDomainAndNormalizesAbsoluteToHttps() {
+        // 相对 purl 拼isure 域名；带 scheme / // 的按 https 归一。
+        assertEquals("https://isure.stream.qqmusic.qq.com/M500xxx.mp3",
+            SongApi.absoluteUrl(UrlinfoItem(null, null, "M500xxx.mp3", null, null, 0L)))
+        assertEquals("https://dl.stream.qqmusic.qq.com/x.m4a",
+            SongApi.absoluteUrl(UrlinfoItem(null, null, "http://dl.stream.qqmusic.qq.com/x.m4a", null, null, 0L)))
+        assertEquals("https://dl.stream.qqmusic.qq.com/x.m4a",
+            SongApi.absoluteUrl(UrlinfoItem(null, null, "//dl.stream.qqmusic.qq.com/x.m4a", null, null, 0L)))
+        // result 非 0（104003 无权限等）、缺 purl、result 缺省一律不可用。
+        assertNull(SongApi.absoluteUrl(UrlinfoItem(null, null, "M500xxx.mp3", null, null, 104003L)))
+        assertNull(SongApi.absoluteUrl(UrlinfoItem(null, null, null, null, null, 0L)))
+        assertNull(SongApi.absoluteUrl(UrlinfoItem(null, null, "M500xxx.mp3", null, null, null)))
+    }
+
+    @Test fun likeReceiptMapsSuccessThrottleAndRawBusinessCode() {
+        assertEquals(LikeResult.Success, SongApi.receipt(LikeReceipt(true, 0L, false)))
+        // throttled 是组件对上游写限流码 1000 的标记，映射回既有 UI 限流文案路径。
+        assertEquals(LikeResult.Rejected(1000), SongApi.receipt(LikeReceipt(false, 1000L, true)))
+        assertEquals(LikeResult.Rejected(80105), SongApi.receipt(LikeReceipt(false, 80105L, false)))
+    }
+
+    @Test fun songDetailIntroOnlyForNonBlankDescription() {
+        val detail = SongDetail("mid", 1L, null, null, null, null, "简介", emptyList(), null, null, null, null)
+        assertEquals("简介", SongApi.introOf(detail))
+        assertNull(SongApi.introOf(SongDetail("mid", null, null, null, null, null, "", emptyList(), null, null, null, null)))
+    }
+
+    @Test fun favNumsKeepNumericSongIdsAndDropMalformedKeys() {
+        val (numbers, show) = SongApi.favNums(
+            GetFavNumResponse(mapOf("123" to 45L, "x" to 6L), mapOf("123" to "45", "x" to "六")))
+        assertEquals(mapOf(123L to 45L), numbers)
+        assertEquals(mapOf(123L to "45"), show)
+        assertEquals(Pair(emptyMap<Long, Long>(), emptyMap<Long, String>()), SongApi.favNums(GetFavNumResponse(null, null)))
     }
 }
