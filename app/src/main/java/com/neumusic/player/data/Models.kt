@@ -48,10 +48,9 @@ data class AlbumItem(
     val singerName: String = "",
 )
 
-/** 搜索到的歌手。 */
+/** 搜索到的歌手（typed 搜索无数字 id，识别一律用 mid）。 */
 data class SearchSinger(
     val mid: String,
-    val id: Long,
     val name: String,
     val pic: String,
     val songNum: Int,

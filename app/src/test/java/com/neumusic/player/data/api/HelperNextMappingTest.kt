@@ -1,5 +1,11 @@
 package com.neumusic.player.data.api
 
+import com.example.qqmusic_api_helper_next.Album as ComponentAlbum
+import com.example.qqmusic_api_helper_next.Artist as ComponentArtist
+import com.example.qqmusic_api_helper_next.Playlist as ComponentPlaylist
+import com.example.qqmusic_api_helper_next.Singer as ComponentSinger
+import com.example.qqmusic_api_helper_next.Track as ComponentTrack
+import com.example.qqmusic_api_helper_next.TrackFileSize as ComponentTrackFileSize
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -50,5 +56,40 @@ class HelperNextMappingTest {
     @Test fun literalNullStringsDontLeakIntoUi() {
         val t = QqMapper.track(JSONObject("""{"songMid":"m","title":null,"album":null,"albumMid":null,"artist":"artist"}"""))!!
         assertEquals("", t.name); assertEquals("", t.albumName); assertEquals("m", t.mediaMid)
+    }
+
+    @Test fun typedSearchTrackMirrorsRawMappingSemantics() {
+        val t = QqMapper.track(ComponentTrack(123L, "song", "media", "<em>Title</em>", "A, B",
+            "Album", "album", 9L, null, 211L, 1L, null,
+            listOf(ComponentSinger("a", "A"), ComponentSinger("b", ""), ComponentSinger("c", null)),
+            null, 34L, listOf(ComponentTrackFileSize("128mp3", 1200L), ComponentTrackFileSize("320ogg", 5000L))))!!
+        assertEquals("media", t.mediaMid); assertEquals("A", t.singer)
+        assertEquals("Title", t.name); assertEquals(34, t.genre)
+        assertEquals(5000L, t.fileSizes["320ogg"]); assertEquals(123L, t.songId)
+        assertTrue(t.isVip)
+    }
+    @Test fun typedSearchTrackFallsBackLikeRawWhenFieldsMissing() {
+        assertNull(QqMapper.track(ComponentTrack(null, "", null, "T", "A", null, null, null,
+            null, null, null, null, null, null, null, emptyList())))
+        val t = QqMapper.track(ComponentTrack(null, "song", null, "T", "A, B", null, null, null,
+            null, null, null, null, null, null, null, emptyList()))!!
+        assertEquals("song", t.mediaMid)   // mediaMid 缺省回退 mid
+        assertEquals("A, B", t.singer)     // singers 缺省时用组件 artist 串
+        assertEquals("", t.albumName)
+        assertFalse(t.isVip); assertEquals(0L, t.songId); assertEquals(0, t.genre)
+        assertEquals(0, t.intervalSec); assertTrue(t.fileSizes.isEmpty())
+    }
+    @Test fun typedSearchArtistAlbumPlaylistKeepHighlightCleanAndHttps() {
+        val a = QqMapper.artist(ComponentArtist("mid", "<em>周</em>杰", "http://y.gtimg.cn/x.jpg", 10L, 5L, null))
+        assertEquals("周杰", a.name); assertEquals("https://y.gtimg.cn/x.jpg", a.pic)
+        assertEquals(10, a.songNum); assertEquals(5, a.albumNum)
+        assertNull(QqMapper.album(ComponentAlbum(1L, "专辑", null, "//y.gtimg.cn/p.jpg", "歌手", null, 7L)))
+        val album = QqMapper.album(ComponentAlbum(1L, "<em>专辑</em>", "albumMid", "//y.gtimg.cn/p.jpg", "歌手", null, 7L))!!
+        assertEquals("albumMid", album.mid); assertEquals("专辑", album.name)
+        assertEquals("https://y.gtimg.cn/p.jpg", album.logo)
+        assertEquals(7, album.songnum); assertEquals("歌手", album.singerName)
+        val p = QqMapper.playlist(ComponentPlaylist(42L, "<em>歌单</em>", "http://qpic.y.qq.com/x", null, 9L, null))
+        assertEquals(42L, p.tid); assertEquals("歌单", p.name)
+        assertEquals("https://qpic.y.qq.com/x", p.logo); assertEquals(9, p.songnum)
     }
 }
