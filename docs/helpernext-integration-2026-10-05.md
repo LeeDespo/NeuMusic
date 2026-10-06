@@ -50,7 +50,7 @@
 | 昵称（与 §4.1 同名行是**同一能力的重复记录**，总量按 1 项计） | covered | 已有可用组件路径 | 薄适配保留 UI 语义，缺省字段归一 |
 | 下载（取直链→拉流→写公共目录） | partial | 直链能力已实现；aria2 不替代 Android 存储 | 组件提供六档直链，Android 保留 MediaStore/台账/命名 |
 | 已下载台账/列表置灰 | gap | 直链能力已实现；aria2 不替代 Android 存储 | 组件提供六档直链，Android 保留 MediaStore/台账/命名 |
-| 曲目字段（songId/mediaMid/singers/isVip/interval） | partial | 仍缺字段 | Rust 曲目模型与解码补齐，Android 映射 |
+| 曲目字段（songId/mediaMid/singers/isVip/interval） | partial | 字段已在，mediaMid 解码不完整 | Rust 曲目模型与解码补齐，Android 映射 |
 | fileSizes（格式弹窗 + 降级过滤） | gap | 仍缺字段 | Rust 曲目模型与解码补齐，Android 映射 |
 | genre 曲风码（智能调音） | gap | 仍缺字段 | Rust 曲目模型与解码补齐，Android 映射 |
 | 播放条/播放页歌手名 → 歌手页 | partial | 已有可用组件路径 | 薄适配保留 UI 语义，缺省字段归一 |

@@ -19,6 +19,22 @@ class HelperNextMappingTest {
         assertNull(PlaylistApi.page(JSONObject("""{"tracks":[],"total":null}""")).total)
         assertEquals(0, PlaylistApi.page(JSONObject("""{"tracks":[],"total":0}""")).total)
     }
+    @Test fun artistAlbumPagePrefersServerOffsetOverFilteredCount() {
+        // 组件回传 nextOffset 时按它推进；无 albumMid 的行被过滤但已占上游位置。
+        val page = SingerApi.albumPage(JSONObject("""{"albums":[{"albumMid":"a"},{"title":"no-mid"}],
+            "total":100,"nextOffset":30}"""))
+        assertEquals(1, page.albums.size)
+        assertEquals(30, page.advanceFrom(0))
+    }
+    @Test fun artistAlbumPageFallsBackToRawRowsAndIgnoresNegativeOffset() {
+        val without = SingerApi.albumPage(JSONObject("""{"albums":[{"albumMid":"a"},{"title":"no-mid"}],"total":100}"""))
+        assertEquals(2, without.advanceFrom(0))
+        assertNull(SingerApi.albumPage(JSONObject("""{"albums":[],"nextOffset":-1}""")).nextOffset)
+    }
+    @Test fun artistAlbumAdvanceNeverGoesBackwards() {
+        val page = SingerApi.AlbumPage(emptyList(), 100, nextOffset = 5)
+        assertThrows(IllegalStateException::class.java) { page.advanceFrom(10) }
+    }
     @Test fun lyricsKeepExactMillisecondsDurationAndPlainKanaMetadata() {
         val lyrics = LyricApi.fromComponent(JSONObject("""{"lyric":{"lyric":"[00:01.001]原文",
             "translation":"[kana:1ゆめ]\n[00:01.001]翻译",

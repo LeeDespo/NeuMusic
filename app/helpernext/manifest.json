@@ -1,8 +1,8 @@
 {
   "repository": "https://github.com/LeeDespo/QQMusicApi_HelperNext",
-  "revision": "7ce4a649ccdc2f85899a6df035c449ce868e7de1",
-  "workingTreeChanges": true,
-  "sourceSha256": "6900c2fb4a22a846a5f50fa1b5e4ea8995c190c55df5326702e623baa63b9596",
+  "revision": "c4c81ddd1e8cd5533f51d6fd4713d91d61e46190",
+  "workingTreeChanges": false,
+  "sourceSha256": "0248dc8b561ced12828342ed8954be92fcafa579044ac0a3916e38e6b1b127eb",
   "boltffi": "0.31.0",
   "minSdk": 24,
   "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
@@ -14,13 +14,12 @@
   ],
   "files": {
     "LICENSE": "c53a65c2fd561c87eaabf1072ef5dcab8653042bc15308465f52413585eb6271",
-    "jniLibs/arm64-v8a/libqqmusic_api_helper_next.so": "f1a1d5123aea5d3feb7eaa85de0b95ee05ecd56d418b0ed351d2884a0810e17b",
-    "jniLibs/armeabi-v7a/libqqmusic_api_helper_next.so": "8a7dfc77f4465ebb1fc9686754b267ec2ffce9fe3c3bc58088892c47bf9a0725",
-    "jniLibs/x86/libqqmusic_api_helper_next.so": "75eb18906d7dc203202a9a5d5899ea8691473abdfb66ed71c20496d45804f9bb",
-    "jniLibs/x86_64/libqqmusic_api_helper_next.so": "849c29d6f74d691d58db653d1a861d6eb4432945a778b5eb2941041ba0904c59",
-    "kotlin/com/example/qqmusic_api_helper_next/QqmusicApiHelperNext.kt": "8ab094233b273b960f2cddcb456766c16d1c4fdcdec9158c8f7b20950eb3d313",
+    "jniLibs/arm64-v8a/libqqmusic_api_helper_next.so": "c6c3a10247f7e68cc0e1ca6f2f2c7a4c205cc6a731abf345ea967532f5ce872d",
+    "jniLibs/armeabi-v7a/libqqmusic_api_helper_next.so": "2a05d673fec125999b88a4716bdce2b12c35665a14cfd3125461ac9fd628fb7e",
+    "jniLibs/x86/libqqmusic_api_helper_next.so": "40afdd1feb3bff8910f3b9df5f9cc2f0c49227da6a0291df52ab1e496b90cb3a",
+    "jniLibs/x86_64/libqqmusic_api_helper_next.so": "8e5b39edfde438fc327b32c2d96191f25b57bc55565cc45186b611530799bfba",
+    "kotlin/com/example/qqmusic_api_helper_next/QqmusicApiHelperNext.kt": "3bc6354980a3ea9c171624a3b7cd9f7037f395c07506876c35be455bad3c4239",
     "kotlin/jni/jni_glue.c": "e0340ccb602b328fb55fbfd36ce2bd90b803329cf893592f73a2b259c847d4b9",
-    "kotlin/jni/qqmusic_api_helper_next.h": "e18ca0a05a6f366a39cf41f128fd1c8c5868c11e0e909d3da5aaae055ec4c038",
-    "source.patch": "a9dce9b4e51986083f7057831bc3a3eb7d178e726172d1563df34e17559d31ef"
+    "kotlin/jni/qqmusic_api_helper_next.h": "e18ca0a05a6f366a39cf41f128fd1c8c5868c11e0e909d3da5aaae055ec4c038"
   }
 }

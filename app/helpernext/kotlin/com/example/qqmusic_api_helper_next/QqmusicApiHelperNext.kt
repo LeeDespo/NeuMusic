@@ -10175,15 +10175,21 @@ data class TrackPage(
  */
 data class AlbumPage(
     val albums: List<Album>,
-    val total: Long?
+    val total: Long?,
+    /**
+     * Next upstream row offset, including rows omitted from `albums` — the
+     * same semantics as [`TrackPage::next_offset`].
+     */
+    val nextOffset: Long?
 ) {
     internal fun wireSize(): Int {
-        return 4 + this.albums.sumOf { __boltffi_value_0 -> val __boltffi_size: kotlin.Int = __boltffi_value_0.wireSize(); __boltffi_size } + 1 + (this.total?.let { __boltffi_value_0 -> 8 } ?: 0)
+        return 4 + this.albums.sumOf { __boltffi_value_0 -> val __boltffi_size: kotlin.Int = __boltffi_value_0.wireSize(); __boltffi_size } + 1 + (this.total?.let { __boltffi_value_0 -> 8 } ?: 0) + 1 + (this.nextOffset?.let { __boltffi_value_0 -> 8 } ?: 0)
     }
 
     internal fun writeTo(writer: WireWriter) {
         writer.writeSequence(this.albums, this.albums.size, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
         writer.writeOptionalValue(this.total, { writer, __boltffi_value_0 -> writer.writeI64(__boltffi_value_0) })
+        writer.writeOptionalValue(this.nextOffset, { writer, __boltffi_value_0 -> writer.writeI64(__boltffi_value_0) })
     }
 
     internal fun toByteArray(): ByteArray {
@@ -10201,6 +10207,7 @@ data class AlbumPage(
         internal fun fromReader(reader: WireReader): AlbumPage {
             return AlbumPage(
                 reader.readSequence({ reader -> Album.fromReader(reader) }),
+                reader.readOptionalValue({ reader -> reader.readI64() }),
                 reader.readOptionalValue({ reader -> reader.readI64() })
             )
         }
@@ -11351,7 +11358,8 @@ data class LikeReceipt(
 data class StreamResolution(
     val songMid: String,
     /**
-     * `flac` / `320` / `128` / `aac` when `playable`.
+     * One of the six ladder labels — `flac` / `ogg320` / `320` / `ogg192` /
+     * `128` / `aac` — when `playable`.
      */
     val quality: String?,
     val filename: String?,
@@ -13443,8 +13451,8 @@ fun albumTracks(albumMid: String?, albumId: Long?, offset: Long, limit: Long): T
 }
 
 /**
- * An artist's songs. `sort` is `hot` or `latest` ("最新" is computed locally —
- * the upstream ignores its ordering parameter).
+ * An artist's songs. `sort` is `hot` or `latest` — both go to the upstream's
+ * own global ordering (`order=1` / `order=2`); nothing is sorted locally.
  */
 fun artistSongs(singerMid: String, sort: String, page: Long, limit: Long): List<Track> {
     val __boltffi_singerMid_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(singerMid))

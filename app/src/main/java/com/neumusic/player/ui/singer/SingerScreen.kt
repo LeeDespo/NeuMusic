@@ -193,18 +193,24 @@ fun SingerScreen(
                     }
                 } else {
                     if (st.albumsTotal <= 0 || st.albumsOffset < st.albumsTotal) {
-                        // 专辑分页按原始行偏移推进（组件不回传 nextOffset；无 mid 行同样占上游位置，
-                        // 用过滤后的 albums.size 会在有不可用行时重复拉同一页）。
+                        // 专辑分页用组件回传的 nextOffset（原始行偏移；无 mid 行同样占上游位置），
+                        // 缺省才回退原始行数——按过滤后的 albums.size 推进会重复拉同一页。
                         val offset = st.albumsOffset
                         runCatching { SingerApi.albums(singer.mid, apiOrder, offset, 30) }.onSuccess { p ->
-                            val next = p.advanceFrom(offset)
+                            // advanceFrom 的 check 会抛；onSuccess 的 lambda 不在 runCatching 覆盖内，
+                            // 同歌曲分支必须在这里兜成失败态。
+                            val next = runCatching { p.advanceFrom(offset) }.getOrNull()
+                            if (next == null) {
+                                st.albumsError = "加载失败，点此重试"
+                                return@onSuccess
+                            }
                             if (p.albums.isNotEmpty()) {
                                 st.albums = (st.albums + p.albums).distinctBy { it.mid }
                                 p.total?.let { st.albumsTotal = it }
                             }
                             st.albumsOffset = next
                             st.albumsLoaded = true
-                            st.albumsError = if (p.albums.isEmpty() && st.albumsTotal > st.albumsOffset) "加载未完成，点此重试" else null
+                            st.albumsError = if (next == offset && st.albumsTotal > offset) "加载未完成，点此重试" else null
                         }.onFailure { st.albumsError = "加载失败，点此重试" }
                     }
                 }
