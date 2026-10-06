@@ -1,43 +1,97 @@
 #!/usr/bin/env python3
-"""Copy a matching Kotlin/native artifact set and provenance, never credentials."""
-import hashlib, json, pathlib, shutil, subprocess, sys, tempfile
-source, destination = map(pathlib.Path, sys.argv[1:])
-output = source / 'dist/android'
-abis = ['arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64']
-for abi in abis:
-    if not (output / 'jniLibs' / abi / 'libqqmusic_api_helper_next.so').is_file():
-        raise SystemExit(f'Missing native artifact: {abi}')
-stage = pathlib.Path(tempfile.mkdtemp(prefix='helpernext-', dir=destination.parent))
-try:
-    shutil.copytree(output / 'kotlin', stage / 'kotlin')
-    shutil.copytree(output / 'jniLibs', stage / 'jniLibs')
-    shutil.copy2(source / 'LICENSE', stage / 'LICENSE')
-    revision = subprocess.check_output(['git', '-C', str(source), 'rev-parse', 'HEAD'], text=True).strip()
-    dirty = bool(subprocess.check_output(['git', '-C', str(source), 'status', '--porcelain'], text=True).strip())
-    if dirty:
-        patch = subprocess.check_output(['git', '-C', str(source), 'diff', '--binary', 'HEAD', '--',
-                                        'src', 'Cargo.toml', 'Cargo.lock', 'boltffi.toml'])
-        untracked = subprocess.check_output(['git', '-C', str(source), 'ls-files', '--others', '--exclude-standard', '--', 'src'], text=True).splitlines()
-        for name in untracked:
-            path = source / name
-            if path.suffix != '.rs':
-                raise SystemExit(f'Untracked source needs explicit packaging: {name}')
-            lines = path.read_text().splitlines()
-            patch += (f'diff --git a/{name} b/{name}\nnew file mode 100644\n--- /dev/null\n+++ b/{name}\n'
-                      f'@@ -0,0 +1,{len(lines)} @@\n' + ''.join('+' + line + '\n' for line in lines)).encode()
-        if patch:
-            (stage / 'source.patch').write_bytes(patch)
-    digest = hashlib.sha256()
-    for path in sorted((source / 'src').rglob('*.rs')) + [source / 'Cargo.toml', source / 'Cargo.lock', source / 'boltffi.toml']:
-        digest.update(str(path.relative_to(source)).encode()); digest.update(b'\0'); digest.update(path.read_bytes())
-    manifest = {'repository': 'https://github.com/LeeDespo/QQMusicApi_HelperNext', 'revision': revision,
-                'workingTreeChanges': dirty, 'sourceSha256': digest.hexdigest(), 'boltffi': '0.31.0', 'minSdk': 24,
-                'rustc': subprocess.check_output(['rustc', '--version'], text=True).strip(),
-                'abis': abis, 'files': {str(p.relative_to(stage)): hashlib.sha256(p.read_bytes()).hexdigest()
-                                      for p in sorted(stage.rglob('*')) if p.is_file()}}
-    (stage / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
-    (stage / 'README.md').write_text('''# Embedded HelperNext\n\nGenerated Kotlin and native libraries from the same Rust checkout using BoltFFI 0.31.0.\nProvenance and SHA-256 checksums are in manifest.json. These files contain no account data.\nRebuild together with `HELPERNEXT_SOURCE=/path/to/QQMusicApi_HelperNext scripts/update-helpernext.sh`.\nChanging only Kotlin package names or replacing only a native library breaks the JNI contract.\n\nThe Rust source is available at https://github.com/LeeDespo/QQMusicApi_HelperNext; the manifest records\nthe base revision, any working-tree changes and an exact source digest. source.patch preserves\nproduction source changes relative to that revision when building an uncommitted checkout. Include matching component\nsource when distributing a modified build. Component license: GPL-3.0-or-later, see LICENSE.\n''')
-    if destination.exists(): shutil.rmtree(destination)
-    stage.rename(destination)
-finally:
-    if stage.exists(): shutil.rmtree(stage)
+"""Install the pinned HelperNext release artifact into app/helpernext/ atomically.
+
+Usage: install-helpernext.py <release.zip> <destination>
+
+Verifies the archive's manifest.json (componentVersion/gitCommit against
+app/helpernext.lock.json, ABI set, per-file SHA-256) and the required files
+(Kotlin binding, all four ABI native libraries, LICENSE) before swapping the
+destination directory in one rename. Never touches credentials.
+"""
+import hashlib, json, pathlib, shutil, sys, tempfile, zipfile
+
+ABIS = ['arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64']
+BINDING = 'kotlin/com/example/qqmusic_api_helper_next/QqmusicApiHelperNext.kt'
+REQUIRED = [BINDING, 'LICENSE'] + [f'jniLibs/{abi}/libqqmusic_api_helper_next.so' for abi in ABIS]
+
+zip_path, destination = map(pathlib.Path, sys.argv[1:3])
+lock = json.loads((destination.parent / 'helpernext.lock.json').read_text())
+
+
+def fail(message):
+    raise SystemExit(f'install-helpernext: {message}')
+
+
+def sha256(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+with zipfile.ZipFile(zip_path) as archive:
+    names = archive.namelist()
+    roots = {name.split('/')[0] for name in names if name.strip('/')}
+    if len(roots) != 1:
+        fail(f'expected a single top-level directory in the archive, got {sorted(roots)}')
+    root = roots.pop()
+
+    manifest = json.loads(archive.read(f'{root}/manifest.json'))
+    if manifest.get('componentVersion') != lock['version']:
+        fail(f"manifest componentVersion {manifest.get('componentVersion')!r} != lock version {lock['version']!r}")
+    # Release manifests carry no 'revision'; gitCommit is the lock's provenance key.
+    if manifest.get('gitCommit') != lock['gitCommit']:
+        fail(f"manifest gitCommit {manifest.get('gitCommit')!r} != lock gitCommit {lock['gitCommit']!r}")
+    if manifest.get('abis') != ABIS:
+        fail(f"manifest abis {manifest.get('abis')} != expected {ABIS}")
+
+    files = manifest.get('files') or fail('manifest.json has no files map')
+    for relative, digest in sorted(files.items()):
+        member = f'{root}/{relative}'
+        if member not in names:
+            fail(f'manifest lists {relative} but it is absent from the archive')
+        actual = sha256(archive.read(member))
+        if actual != digest:
+            fail(f'sha256 mismatch for {relative}: manifest {digest}, archive {actual}')
+
+    for relative in REQUIRED:
+        if relative not in files and f'{root}/{relative}' not in names:
+            fail(f'required file {relative} is absent from the archive')
+
+    stage = pathlib.Path(tempfile.mkdtemp(prefix='helpernext-stage-', dir=destination.parent))
+    try:
+        for name in names:
+            if name.strip('/') == name and not name.endswith('/'):
+                relative = name[len(root) + 1:]
+                if not relative or relative in ('..',) or '/../' in f'/{relative}':
+                    fail(f'unsafe archive member: {name}')
+                target = stage / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(archive.read(name))
+        (stage / 'README.md').write_text(
+            '# Embedded HelperNext\n'
+            '\n'
+            'Kotlin bindings and native libraries consumed from the official HelperNext Release\n'
+            'pinned in ../helpernext.lock.json; provenance and per-file SHA-256 checksums are in\n'
+            'manifest.json. These files contain no account data. Refreshed with\n'
+            '`scripts/update-helpernext.sh`, which downloads the pinned release asset, verifies its\n'
+            'sha256 against the lock, checks manifest componentVersion/gitCommit and file digests,\n'
+            'then swaps this directory atomically. Do not edit these files by hand and never mix\n'
+            'files from different HelperNext revisions: the Kotlin binding, JNI glue and all four\n'
+            'ABI libraries are one atomic set. Component license: GPL-3.0-or-later, see LICENSE.\n')
+        previous = None
+        if destination.exists():
+            previous = pathlib.Path(tempfile.mkdtemp(prefix='helpernext-old-', dir=destination.parent)) / 'vendor'
+            destination.rename(previous)
+        try:
+            stage.rename(destination)
+        except OSError:
+            if previous is not None:
+                previous.rename(destination)
+                previous = None
+            raise
+        stage = None
+        if previous is not None:
+            shutil.rmtree(previous.parent)
+        print(f"Installed {root} -> {destination} "
+              f"(component {lock['version']}, gitCommit {lock['gitCommit'][:12]}...)")
+    finally:
+        if stage is not None and stage.exists():
+            shutil.rmtree(stage)

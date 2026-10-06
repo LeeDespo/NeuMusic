@@ -1,11 +1,12 @@
 {
-  "repository": "https://github.com/LeeDespo/QQMusicApi_HelperNext",
-  "revision": "c4c81ddd1e8cd5533f51d6fd4713d91d61e46190",
-  "workingTreeChanges": false,
-  "sourceSha256": "0248dc8b561ced12828342ed8954be92fcafa579044ac0a3916e38e6b1b127eb",
+  "name": "QQMusicApi_HelperNext",
+  "componentVersion": "0.2.0",
+  "protocolVersion": 2,
+  "gitCommit": "b8516b35ab5ac59e5a0463a5b798ca8756ad285b",
   "boltffi": "0.31.0",
+  "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+  "androidNdk": "27.3.13750724",
   "minSdk": 24,
-  "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
   "abis": [
     "arm64-v8a",
     "armeabi-v7a",
@@ -13,13 +14,12 @@
     "x86_64"
   ],
   "files": {
-    "LICENSE": "c53a65c2fd561c87eaabf1072ef5dcab8653042bc15308465f52413585eb6271",
-    "jniLibs/arm64-v8a/libqqmusic_api_helper_next.so": "c6c3a10247f7e68cc0e1ca6f2f2c7a4c205cc6a731abf345ea967532f5ce872d",
-    "jniLibs/armeabi-v7a/libqqmusic_api_helper_next.so": "2a05d673fec125999b88a4716bdce2b12c35665a14cfd3125461ac9fd628fb7e",
-    "jniLibs/x86/libqqmusic_api_helper_next.so": "40afdd1feb3bff8910f3b9df5f9cc2f0c49227da6a0291df52ab1e496b90cb3a",
-    "jniLibs/x86_64/libqqmusic_api_helper_next.so": "8e5b39edfde438fc327b32c2d96191f25b57bc55565cc45186b611530799bfba",
     "kotlin/com/example/qqmusic_api_helper_next/QqmusicApiHelperNext.kt": "3bc6354980a3ea9c171624a3b7cd9f7037f395c07506876c35be455bad3c4239",
     "kotlin/jni/jni_glue.c": "e0340ccb602b328fb55fbfd36ce2bd90b803329cf893592f73a2b259c847d4b9",
-    "kotlin/jni/qqmusic_api_helper_next.h": "e18ca0a05a6f366a39cf41f128fd1c8c5868c11e0e909d3da5aaae055ec4c038"
+    "kotlin/jni/qqmusic_api_helper_next.h": "e18ca0a05a6f366a39cf41f128fd1c8c5868c11e0e909d3da5aaae055ec4c038",
+    "jniLibs/arm64-v8a/libqqmusic_api_helper_next.so": "241a022c8ac9cb215735bc55c1b910c838ba8da78b7e621987e182f619f3fad6",
+    "jniLibs/armeabi-v7a/libqqmusic_api_helper_next.so": "02c3c0b6d4893d7a2a88176f933c4e7b9a1eea279e35300aee6cf1d49f439e43",
+    "jniLibs/x86/libqqmusic_api_helper_next.so": "80d389e7413b2d10d2d4f03857943d3c4f6bb15167d2d945c4139beedbd0cffe",
+    "jniLibs/x86_64/libqqmusic_api_helper_next.so": "4ff57a930cdea5762864125a74370b3271ae3ace705121fb9638c395c3175dde"
   }
 }
