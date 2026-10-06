@@ -61,6 +61,12 @@ class HelperNextReadTest {
         assertTrue(next.songs.none { row -> latest.songs.any { it.mid == row.mid } })
         val artistAlbums = SingerApi.albums(artist.mid, SingerApi.ORDER_NEW, 0, 3)
         assertTrue(artistAlbums.albums.isNotEmpty()); assertTrue(artistAlbums.albums.any { it.songnum > 0 })
+        // 组件按原始行偏移回传 nextOffset；按它推进到第二页不应重复第一页专辑。
+        assertNotNull(artistAlbums.nextOffset)
+        val artistAlbumsAdvance = artistAlbums.advanceFrom(0)
+        assertTrue(artistAlbumsAdvance > 0)
+        val artistAlbumsNext = SingerApi.albums(artist.mid, SingerApi.ORDER_NEW, artistAlbumsAdvance, 3)
+        assertTrue(artistAlbumsNext.albums.none { row -> artistAlbums.albums.any { it.mid == row.mid } })
         val album = PlaylistApi.albumPage(SearchApi.albums("周杰伦", 3).first().mid, 0, 3)
         assertTrue(album.songs.isNotEmpty()); assertNotNull(album.total)
         val playlist = PlaylistApi.playlistPage(SearchApi.playlists("周杰伦", 3).first().tid, 0, 3)
