@@ -13,10 +13,10 @@ import org.junit.Test
 
 /** Explicit live reads using an existing account; no login or write calls. */
 class HelperNextReadTest {
-    @Before fun existingAccount() {
+    @Before fun existingAccount() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         Prefs.init(context)
-        assertNotNull("Existing QQ account is required", Prefs.credential)
+        assertNotNull("Existing QQ account is required", awaitLogin())
         assertFalse(context.getSharedPreferences("neumusic", 0).contains("credential"))
     }
 
@@ -47,7 +47,7 @@ class HelperNextReadTest {
         assertTrue(LikedStore.loaded.value); assertEquals(snapshot.ids, LikedStore.liked.value)
         PlaylistApi.favPlaylists(1, 3); PlaylistApi.favAlbums(1, 3)
         UserApi.followSingers(0, 3)
-        assertNotNull(UserApi.nickname())
+        assertNotNull(awaitLogin())
     }
 
     @Test fun artistSortsTotalsAndAlbumPlaylistPages() = runBlocking {

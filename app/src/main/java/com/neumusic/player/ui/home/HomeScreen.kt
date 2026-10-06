@@ -65,8 +65,8 @@ import com.neumusic.player.data.api.FollowSinger
 import com.neumusic.player.data.api.UserApi
 import com.neumusic.player.player.PlayerHost
 import com.neumusic.player.data.PlaylistItem
-import com.neumusic.player.data.Prefs
 import com.neumusic.player.data.api.ApiCache
+import com.neumusic.player.data.api.HelperNext
 import com.neumusic.player.data.api.PlaylistApi
 import com.neumusic.player.data.api.RadioApi
 import com.neumusic.player.data.RadioGroup
@@ -152,6 +152,10 @@ fun HomeScreen(
     var recJoiningRadio by remember { mutableStateOf(false) }
     var followedSingers by remember { mutableStateOf<List<FollowSinger>?>(null) }
 
+    // 非敏感登录快照（组件 typed loginStatus，后台异步解析）：驱动账号区空态文案
+    // 与首屏账号数据守卫；冷启动解析落地时本页引导效应会带着正确快照重跑一次。
+    val login by HelperNext.login.collectAsState()
+
     // 点播放 = **接入猜你喜欢的播放**（用推荐歌做首曲，后面跟一批电台曲目作队列），
     // 而不是把单曲丢进一个一首歌的队列（那样播完循环，用户实测指出）。
     suspend fun playRecommended(track: Track) {
@@ -174,8 +178,8 @@ fun HomeScreen(
         }
     }
 
-    LaunchedEffect(Unit) {
-        val requestCredential = Prefs.credential
+    LaunchedEffect(login) {
+        val requestLogin = login
 
         // ── 1) 磁盘快照立即上屏（冷启动不再白屏等网络）──
         HomeCache.playlists()?.let { playlists = it }
@@ -188,7 +192,7 @@ fun HomeScreen(
         scope.launch {
             runCatching { ApiCache.getOrPut("favPlaylists") { PlaylistApi.favPlaylists() } }
                 .onSuccess {
-                    if (Prefs.credential != requestCredential) return@onSuccess
+                    if (HelperNext.login.value != requestLogin) return@onSuccess
                     playlists = it
                     HomeCache.savePlaylists(it)
                 }
@@ -197,7 +201,7 @@ fun HomeScreen(
         scope.launch {
             runCatching { ApiCache.getOrPut("favAlbums") { PlaylistApi.favAlbums() } }
                 .onSuccess {
-                    if (Prefs.credential != requestCredential) return@onSuccess
+                    if (HelperNext.login.value != requestLogin) return@onSuccess
                     albums = it
                     albumsLoaded = true
                     HomeCache.saveAlbums(it)
@@ -207,7 +211,7 @@ fun HomeScreen(
         scope.launch {
             runCatching { ApiCache.getOrPut("radioGroups") { RadioApi.groups() } }
                 .onSuccess {
-                    if (Prefs.credential != requestCredential) return@onSuccess
+                    if (HelperNext.login.value != requestLogin) return@onSuccess
                     radioGroups = it
                     radioLoaded = true
                     HomeCache.saveRadioGroups(it)
@@ -224,12 +228,12 @@ fun HomeScreen(
             .firstOrNull { st -> st.title == "猜你喜欢" }
         if (station != null) RecommendStore.stationId = station.id
 
-        // ── 3.5) 关注的歌手（组件按需解析账号标识）──
+        // ── 3.5) 关注的歌手（typed 分页；组件按当前登录账号解析标识，未登录不发请求）──
         scope.launch {
-            val fetched = if (requestCredential != null) {
+            val fetched = if (requestLogin != null) {
                 runCatching { UserApi.followSingers(0, 30).first }.getOrDefault(emptyList())
             } else emptyList()
-            if (Prefs.credential == requestCredential) followedSingers = fetched
+            if (HelperNext.login.value == requestLogin) followedSingers = fetched
         }
 
         // ── 4) 我喜欢全量刷新与数量（放最后，不跟三栏抢首批请求）──
@@ -237,7 +241,7 @@ fun HomeScreen(
         scope.launch {
             runCatching { ApiCache.getOrPut("likedCount") { PlaylistApi.likedPage(0, 1).total } }
                 .getOrNull()?.let { c ->
-                    if (Prefs.credential != requestCredential) return@let
+                    if (HelperNext.login.value != requestLogin) return@let
                     likedCount = c
                     HomeCache.saveLikedCount(c)
                 }
@@ -324,7 +328,7 @@ fun HomeScreen(
                 empty = albums.isEmpty(),
                 emptyText = when {
                     !albumsLoaded -> "加载中…"
-                    Prefs.credential == null -> "登录后显示"
+                    login == null -> "登录后显示"
                     else -> "还没有收藏的专辑"
                 },
             ) {
@@ -345,7 +349,7 @@ fun HomeScreen(
                 empty = f.isNullOrEmpty(),
                 emptyText = when {
                     f == null -> "加载中…"
-                    Prefs.credential == null -> "登录后显示"
+                    login == null -> "登录后显示"
                     else -> "还没有关注的歌手"
                 },
             ) {

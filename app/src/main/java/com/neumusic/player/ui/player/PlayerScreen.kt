@@ -59,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.neumusic.player.data.PlayMode
 import com.neumusic.player.data.Prefs
+import com.neumusic.player.data.api.HelperNext
 import com.neumusic.player.data.api.SongApi
 import com.neumusic.player.player.PlayerHost
 import com.neumusic.player.player.VizHost
@@ -163,7 +164,7 @@ fun PlayerScreen(onBack: () -> Unit, onOpenEqualizer: () -> Unit = {}) {
     val likedIds by LikedStore.liked.collectAsState()
     LaunchedEffect(track?.mid) {
         val t = track ?: return@LaunchedEffect
-        if (Prefs.credential == null || t.songId <= 0L) {
+        if (HelperNext.login.value == null || t.songId <= 0L) {
             PlayerHost.setLiked(false)
             return@LaunchedEffect
         }

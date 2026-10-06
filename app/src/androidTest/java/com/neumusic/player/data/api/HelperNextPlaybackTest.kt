@@ -20,7 +20,7 @@ class HelperNextPlaybackTest {
         fun main(block: () -> Unit) = inst.runOnMainSync(block)
         try {
             main { Prefs.init(context); AppLog.init(context) }
-            assertNotNull(Prefs.credential)
+            assertNotNull(awaitLogin())
             val song = SearchApi.songs("周杰伦 晴天", 3).first()
             main {
                 PlayerHost.resolveUrl = { SongApi.playUrl(it, Quality.STANDARD) }

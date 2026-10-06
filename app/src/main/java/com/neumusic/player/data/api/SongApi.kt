@@ -1,6 +1,5 @@
 package com.neumusic.player.data.api
 
-import com.neumusic.player.data.Prefs
 import com.neumusic.player.data.Quality
 import com.neumusic.player.data.Track
 import org.json.JSONArray
@@ -72,7 +71,7 @@ object SongApi {
         JSONObject().put("songMid", mid)).optJSONObject("detail")?.text("description")?.takeIf(String::isNotBlank) }.getOrNull()
 
     suspend fun setLiked(track: Track, liked: Boolean): LikeResult {
-        if (Prefs.credential == null) return LikeResult.Unavailable("未登录")
+        if (HelperNext.login.value == null) return LikeResult.Unavailable("未登录")
         if (track.songId <= 0L) return LikeResult.Unavailable("这首没有可用的歌曲 id")
         val receipt = HelperNext.call("set_liked_by_id", JSONObject().put("songId", track.songId).put("liked", liked))
         return if (receipt.optBoolean("success")) LikeResult.Success else LikeResult.Rejected(receipt.optInt("code", -1))

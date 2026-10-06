@@ -1,8 +1,18 @@
 package com.neumusic.player.data.api
 
 import com.neumusic.player.data.Track
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 
 internal data class LikedSnapshot(val ids: Set<Long>, val total: Int?, val consumed: Int)
+
+/**
+ * 登录态自组件 typed loginStatus 后台异步解析；等到落地为止。
+ * 超时返回 null（视为未登录）——live 测试用它替代旧的凭据快照判据。
+ */
+internal suspend fun awaitLogin(timeoutMs: Long = 30_000L): LoginStatus? =
+    withTimeoutOrNull(timeoutMs) { HelperNext.login.filterNotNull().first() }
 
 /** Independent server snapshot for live membership and restoration checks. */
 internal suspend fun componentLikedSnapshot(): LikedSnapshot {

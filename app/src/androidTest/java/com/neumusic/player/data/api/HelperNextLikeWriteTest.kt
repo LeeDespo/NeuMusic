@@ -14,7 +14,7 @@ class HelperNextLikeWriteTest {
     @Test fun numericIdLikeReceiptAndAccountRestoration() = runBlocking {
         assumeTrue(InstrumentationRegistry.getArguments().getString("executeWrites") == "true")
         Prefs.init(InstrumentationRegistry.getInstrumentation().targetContext)
-        assertNotNull(Prefs.credential)
+        assertNotNull(awaitLogin())
         val before = componentLikedSnapshot()
         val candidate = SearchApi.songs("天外来物", 10).firstOrNull { it.songId > 0 && it.songId !in before.ids }
             ?: error("No absent candidate; do not alter an existing like")

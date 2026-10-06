@@ -47,6 +47,7 @@ import coil.compose.AsyncImage
 import com.neumusic.player.data.LikedStore
 import com.neumusic.player.data.Prefs
 import com.neumusic.player.data.Track
+import com.neumusic.player.data.api.HelperNext
 import com.neumusic.player.data.api.SongApi
 import com.neumusic.player.player.PlayerHost
 import kotlinx.coroutines.launch
@@ -333,7 +334,7 @@ fun CoverPlaceholder(icon: ImageVector = Icons.Filled.MusicNote, text: String? =
  * 红心点击的统一入口（曲目列表行 / 搜索结果 / 播放栏共用）：写服务端成功后更新本地集合。
  */
 fun toggleLike(context: Context, track: Track, liked: Boolean) {
-    if (Prefs.credential == null) {
+    if (HelperNext.login.value == null) {
         toastMain(context, "请先在设置里登录")
         return
     }

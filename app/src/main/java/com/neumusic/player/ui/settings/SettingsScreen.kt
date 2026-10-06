@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableIntStateOf
@@ -57,7 +58,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.neumusic.player.data.CredentialInfo
-import com.neumusic.player.data.NicknameCache
 import com.neumusic.player.data.AccentMode
 import com.neumusic.player.data.DownloadDir
 import com.neumusic.player.data.LightingMode
@@ -69,7 +69,7 @@ import com.neumusic.player.data.Quality
 import com.neumusic.player.data.Relief
 import com.neumusic.player.data.ThemeMode
 import com.neumusic.player.data.api.ApiCache
-import com.neumusic.player.data.api.UserApi
+import com.neumusic.player.data.api.HelperNext
 import com.neumusic.player.shade.LocalShadeColors
 import com.neumusic.player.shade.DayLightHost
 import com.neumusic.player.shade.OFFSET_RANGE
@@ -97,7 +97,8 @@ fun SettingsScreen(onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     val colors = LocalShadeColors.current
 
-    var cred by remember { mutableStateOf(Prefs.credential) }
+    // 非敏感登录快照（组件 typed loginStatus；登录/退出经 HelperNext.login 流动更新）。
+    val login by HelperNext.login.collectAsState()
     var showWebLogin by remember { mutableStateOf(false) }
     // 分区（用户 2026-10-01 规格：设置项按区分组、用分段控制器切换）
     var tab by remember { mutableIntStateOf(0) }
@@ -125,7 +126,6 @@ fun SettingsScreen(onBack: () -> Unit) {
             onClose = { showWebLogin = false },
             onLoggedIn = {
                 showWebLogin = false
-                cred = Prefs.credential
                 scope.launch { ApiCache.clear() }
                 LikedStore.clear()
                 HomeCache.clear()
@@ -183,25 +183,29 @@ fun SettingsScreen(onBack: () -> Unit) {
                     ) {
                         Icon(
                             Icons.Filled.Person, null,
-                            tint = if (cred != null) colors.accent else colors.textTertiary,
+                            tint = if (login != null) colors.accent else colors.textTertiary,
                         )
                     }
                     Column {
+                        val account = login
                         Text(
-                            if (cred != null) "已登录  ${cred!!.uin}" else "未登录",
+                            when {
+                                account == null -> "未登录"
+                                account.musicId != null -> "已登录  ${account.musicId}"
+                                else -> "已登录"
+                            },
                             fontSize = 15.sp, color = colors.textPrimary, fontWeight = FontWeight.Medium,
                         )
                         Text(
-                            if (cred == null) "登录后同步我喜欢 / 歌单 / 专辑" else "登录凭据由 HelperNext 管理",
+                            if (account == null) "登录后同步我喜欢 / 歌单 / 专辑" else "登录凭据由 HelperNext 管理",
                             fontSize = 12.sp, color = colors.textSecondary,
                         )
                     }
                 }
                 ShadeButton("网页登录", Modifier.fillMaxWidth(), primary = true) { showWebLogin = true }
-                if (cred != null) {
+                if (login != null) {
                     ShadeButton("退出登录", Modifier.fillMaxWidth(), primary = false) {
                         Prefs.clearCredential()
-                        cred = null
                         scope.launch { ApiCache.clear() }
                         LikedStore.clear()
                         HomeCache.clear()
@@ -838,9 +842,9 @@ private fun WebLoginOverlay(onClose: () -> Unit, onLoggedIn: () -> Unit) {
                     if (uin.isEmpty() || musickey.isEmpty()) {
                         toastMain(context, "未检测到登录 Cookie，请先在页面中完成登录")
                     } else {
+                        // uin/qm_keyst/euin 只作为导入前 DTO 即取即用；导入后登录态由
+                        // HelperNext.login 快照驱动（昵称经 typed loginStatus 后台校正）。
                         Prefs.saveCredential(CredentialInfo(uin, musickey, euin))
-                        // 拉一次昵称供主页问候语使用
-                        scope.launch { NicknameCache.set(runCatching { UserApi.nickname() }.getOrNull()) }
                         toastMain(
                             context,
                             "登录成功",

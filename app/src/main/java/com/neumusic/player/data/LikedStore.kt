@@ -1,5 +1,6 @@
 package com.neumusic.player.data
 
+import com.neumusic.player.data.api.HelperNext
 import com.neumusic.player.data.api.PlaylistApi
 import com.neumusic.player.data.api.SongApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,7 +32,7 @@ object LikedStore {
      * 未登录时静默跳过。
      */
     suspend fun refresh(force: Boolean = false) {
-        val credential = Prefs.credential ?: return
+        val login = HelperNext.login.value ?: return
         val requestGeneration = synchronized(lock) {
             if (loading || (_loaded.value && !force)) return
             loading = true
@@ -42,12 +43,12 @@ object LikedStore {
             val accumulated = LikedPageAccumulator()
             repeat(50) {
                 val page = runCatching { PlaylistApi.likedPage(accumulated.offset, 300) }.getOrNull() ?: return
-                if (requestGeneration != generation || Prefs.credential != credential) return
+                if (requestGeneration != generation || HelperNext.login.value != login) return
                 val complete = runCatching { accumulated.consume(page) }.getOrElse { return }
                 val ids = accumulated.ids
                 if (complete) {
                     synchronized(lock) {
-                        if (requestGeneration != generation || Prefs.credential != credential) return
+                        if (requestGeneration != generation || HelperNext.login.value != login) return
                         pendingMarks.forEach { (id, liked) -> if (liked) ids.add(id) else ids.remove(id) }
                         _liked.value = ids
                         _loaded.value = true

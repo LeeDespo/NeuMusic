@@ -68,10 +68,11 @@ enum class LightingMode(val label: String) {
 }
 
 /**
- * 轻量配置存取：组件登录凭据、音质、播放模式、
- * 深色模式、立体感强度。
+ * 轻量配置存取：音质、播放模式、深色模式、立体感强度。
  *
- * 关于昵称：不持久化。登录后从 GetLoginUserInfo 拉取缓存于内存（见 [NicknameCache]）。
+ * 关于登录：凭据值不归宿主持有——组件私有存储是唯一持久来源；宿主只持有
+ * 组件 typed loginStatus 的**非敏感**快照（见 [com.neumusic.player.data.api.HelperNext.login]）。
+ * [CredentialInfo] 只是导入前的短生命周期 DTO（网页登录 cookie / 旧版迁移），值即取即用不落日志。
  *
  * 关于响应式：这些值要驱动整个 Compose 树重建，所以除写盘外还各带一个
  * `MutableStateFlow`，由 UI 层 `collectAsState` 订阅，避免改了设置界面不动。
@@ -353,32 +354,19 @@ object Prefs {
     val barVizFlow = MutableStateFlow(false)
     val vinylModeFlow = MutableStateFlow(false)
 
-    val credential: CredentialInfo?
-        get() = com.neumusic.player.data.api.HelperNext.credential()
-
     fun saveCredential(info: CredentialInfo) {
         com.neumusic.player.data.api.HelperNext.saveCredential(info)
         sp.edit().remove("credential").commit()
-        NicknameCache.set(null)
         com.neumusic.player.data.api.LyricApi.clear()
     }
 
     fun clearCredential() {
         com.neumusic.player.data.api.HelperNext.clearCredential()
         sp.edit().remove("credential").commit()
-        NicknameCache.set(null)
         com.neumusic.player.data.api.LyricApi.clear()
     }
 
 }
 
+/** 导入用短生命周期凭据 DTO（网页登录 cookie 捕获 / 旧版迁移），不持久、不落日志。 */
 data class CredentialInfo(val uin: String, val musickey: String, val euin: String = "")
-
-/** 登录用户昵称的内存缓存（用于主页问候语）。 */
-object NicknameCache {
-    @Volatile
-    private var value: String? = null
-
-    fun get(): String? = value
-    fun set(v: String?) { value = v }
-}
