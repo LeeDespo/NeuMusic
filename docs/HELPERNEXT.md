@@ -38,7 +38,7 @@ lock 版本 = 下载的 Release = vendor manifest = generated Kotlin 绑定 = �
 - 组件目标 **minSdk 24**（应用 26）；所有 ELF LOAD 段 **16KB 对齐**。
 - `app/helpernext/README.md` 是 vendor 目录内的出处说明，与本文件一致。
 
-## 消费规则（typed-only，迁移目标）
+## 消费规则（typed-only）
 
 生产代码应使用 generated **typed BoltFFI Kotlin API**。不得新增基于以下内容的路径：
 
@@ -54,13 +54,13 @@ raw QQ 上游 JSON 解析
 
 需要精确 API 名/类型时，直接查看 `app/helpernext/kotlin/` 下的 generated 绑定。
 
-**过渡措辞**：typed-only 是迁移目标——存量 16 处 raw `HelperNext.call(...)` 域适配调用（`data/api/` 的 UserApi/SingerApi/LyricApi/SongApi/RadioApi/SearchApi/PlaylistApi）按 Phase C/D 退役；**在此之前不得新增同类调用**，只允许维护既有行为。
+**迁移已完成**：生产代码（`app/src/main`）无 raw `HelperNext.call(...)` 调用，各域 Api（UserApi/SingerApi/LyricApi/SongApi/RadioApi/SearchApi/PlaylistApi）均走 generated typed 绑定。已知偏差：`data/api/HelperNext.kt` 的 `call()` 包装（内部 `callWithPlatform`）保留、无生产调用方，仅 androidTest live 测试使用；不得为其新增生产调用点。
 
-## 凭据边界（迁移目标）
+## 凭据边界
 
 - 宿主可经 UI/WebView 收集登录值并导入组件；秘密流向是 `登录 UI → 导入组件 → 组件私有存储`。
 - **宿主不得读取/依赖 HelperNext 私有凭据文件（`files/HelperNext/Credential/qqmusic-credential.json`）的路径或 JSON schema**；不得为判断登录态解析/返回 `qm_keyst` 等会话秘密；非敏感会话状态用 typed 账号/登录状态接口。
-- 存量 `data/api/HelperNext.kt` 的直接读取与一次性旧凭据迁移按 Phase C/D 退役。
+- 宿主不读组件私有凭据文件（原 `data/api/HelperNext.kt` 直接读取已退役）；旧 SharedPreferences 凭据的一次性迁移保留在 `data/api/HelperNext.kt` 初始化中（幂等，成功后删除宿主侧副本）。
 - 任何输出/日志/commit 中不得出现凭据票据值。
 
 ## 升级脚本

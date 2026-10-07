@@ -22,8 +22,8 @@ app/helpernext/  HelperNext 组件产物（generated/vendor，见 docs/HELPERNEX
 - `app/` — Kotlin + Jetpack Compose，包名 `com.neumusic.player`。
   - `shade/Shade.kt` — 视觉与交互基元（风格参考 ShadeCraft）：`shadeSurface`（凸起）、`shadeInset`（凹陷）、`shadePressable`（按压交互）、`ShadeFusedTabs`/`ShadeFusedTab`（基元保留，现仅搜索页使用）。
   - `data/`：
-    - `api/HelperNext.kt` — BoltFFI/JNI 组件入口：在应用私有 `filesDir/HelperNext` 初始化；启动时把旧 SharedPreferences 凭据迁移进组件并在成功后删除旧副本；`call()` 薄封装 + `ApiCache`。
-    - `api/` 按域薄适配：`SearchApi`、`PlaylistApi`、`RadioApi`、`SongApi`（取链接 + 喜欢写入）、`LyricApi`、`UserApi`、`SingerApi`、`QqMapper`（组件 JSON → UI 模型）、`ApiCache`。
+    - `api/HelperNext.kt` — BoltFFI/JNI 组件入口：在应用私有 `filesDir/HelperNext` 初始化；启动时把旧 SharedPreferences 凭据迁移进组件并在成功后删除旧副本；`call()` 薄封装保留（无生产调用方，仅 androidTest 使用）+ `ApiCache`。
+    - `api/` 按域薄适配：`SearchApi`、`PlaylistApi`、`RadioApi`、`SongApi`（取链接 + 喜欢写入）、`LyricApi`、`UserApi`、`SingerApi`、`QqMapper`（组件 typed 模型 → UI 模型）、`ApiCache`。
     - `AppLog` — 结构化诊断日志（filesDir/diagnostics.log；设置里可开关/清空/限容 MB 超限砍前一半/SAF 导出；默认开）。
     - `RecommendStore` — 推荐歌曲预缓冲 5 首（曲目+介绍）落盘持久化。
     - `Prefs` — 凭据入口（实际存组件凭据文件）/音质/播放模式/外观/音效预设存储（eqStore、eqGenreMap）。
@@ -40,15 +40,15 @@ app/helpernext/  HelperNext 组件产物（generated/vendor，见 docs/HELPERNEX
 - 网络请求经 BoltFFI/JNI 同步调用，**一律包在 `Dispatchers.IO`**，不阻塞主线程。
 - 组件初始化在 `data/api/HelperNext.kt`，使用应用私有 `filesDir/HelperNext`。
 - 各域 Api 只做「组件响应 → UI 模型」的薄适配（`QqMapper`）；不得在宿主出现 QQ 端点名、请求信封、签名/设备逻辑或 raw 上游 JSON 解析的新增代码（规则见 `docs/HELPERNEXT.md`）。
-- typed BoltFFI Kotlin API 是消费目标；typed 迁移落地前维持现有 raw 域适配（见迁移期注意）。
+- 域适配已全部走 typed BoltFFI Kotlin API：生产代码无 raw `HelperNext.call` 调用（已知偏差：`data/api/HelperNext.kt` 的 `call()` 包装仅 androidTest 使用，见 `docs/HELPERNEXT.md`）。
 
 ## 凭据流
 
 - **唯一持久来源是组件管理的 `files/HelperNext/Credential/qqmusic-credential.json`**（内容为 uin + musickey + euin；值绝不打印、提交或写进任何报告）。
-- 宿主 `Prefs.credential` 只是转发入口：读组件文件、保存时交给组件导入并删除旧 SharedPreferences 副本（迁移在 `HelperNext.kt` 初始化自动完成，失败则下次启动重试）。
+- 宿主不读组件文件：`Prefs.saveCredential` 把网页登录值作为即取即用 DTO 交给组件导入并删除旧 SharedPreferences 副本（一次性迁移在 `HelperNext.kt` 初始化自动完成，失败则下次启动重试）。
 - 登录唯一入口 = 网页登录：WebView 打开 y.qq.com → 读 cookie 的 uin/qm_keyst（+euin）→ 交给组件导入。缺 euin 时收藏类列表不可用，界面提示重新登录。
-- **账号切换/退出必须清理宿主缓存与在途结果**：`ApiCache` 的每个条目按当时的 `credential` 键控（`ApiCache.kt:20,33`），账号变化即在途结果作废（`ApiCache.kt:42`）；`LikedStore` 用 generation + credential 双守卫（`LikedStore.kt:24,45`）。同步清理歌词等派生缓存。
-- 迁移目标：宿主不得读组件私有凭据文件路径/schema、不得用会话秘密判断登录态；现状 `HelperNext.kt` 的直接读取按 Phase C/D 退役。
+- **账号切换/退出必须清理宿主缓存与在途结果**：`ApiCache` 的每个条目按当时的非敏感登录快照键控（`ApiCache.kt:21,34`），账号变化即在途结果作废（`ApiCache.kt:43`）；`LikedStore` 用 generation + 登录快照双守卫（`LikedStore.kt:25,46`）。同步清理歌词等派生缓存。
+- 宿主不得读组件私有凭据文件路径/schema、不得用会话秘密判断登录态（已落地：登录态用组件 typed `loginStatus()` 的非敏感快照，宿主代码不出现凭据文件路径或 schema）。
 
 ## 分页与数据消费（nextOffset 语义）
 
@@ -82,7 +82,7 @@ typed 迁移后此语义由 `TrackPage.nextOffset` 等模型继续承载，仍�
 ## 喜欢写入（live 写，消费侧行为）
 
 - 必须用**数字 `songId`**（`songId<=0` 无法操作），不是 mid。
-- **业务码 `1000` = 风控限流**：短时间多次写后持续返回，读接口同时完全正常，继续重试只会延长限流。**写失败不自动重试**；`LikeResult.Rejected(1000)` 呈现为「操作太频繁，已被限流，请稍后再试」（`TrackRow.kt:357`）。播客/白噪音类曲目同样可能返回 1000，无法与限流区分。
+- **业务码 `1000` = 风控限流**：短时间多次写后持续返回，读接口同时完全正常，继续重试只会延长限流。**写失败不自动重试**；`LikeResult.Rejected(1000)` 呈现为「操作太频繁，已被限流，请稍后再试」（`TrackRow.kt:353`）。播客/白噪音类曲目同样可能返回 1000，无法与限流区分。
 - 不回退到 `PlaylistFavWrite/CgiAddSonglist` + songMid 路径（返回 40000）。
 - 写测试纪律见 `docs/TESTING.md`。
 

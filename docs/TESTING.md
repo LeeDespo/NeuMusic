@@ -33,7 +33,7 @@ adb -s <设备名> shell am instrument -w com.neumusic.player.test/androidx.test
 入口：`app/src/androidTest/.../data/api/HelperNextReadTest.kt`（配套 `HelperNextTestSupport.kt`）。
 
 - 只做读操作：搜索、收藏歌单/专辑、关注歌手、昵称、我喜欢完整分页、歌手热度/最新排序与专辑歌数、电台、歌曲详情、六档音质、日文 QRC/roma/kana。
-- 不测登录/微信/扫码流程（现有账号凭据由测试支持代码从组件凭据文件读取）。
+- 不测登录/微信/扫码流程（登录态由组件 typed `loginStatus()` 异步解析，测试支持代码经 `HelperNextTestSupport.awaitLogin` 等待其落地，凭据值不进入测试代码；未登录即断言失败）。
 
 ## live write（真实账号写，默认不跑）
 

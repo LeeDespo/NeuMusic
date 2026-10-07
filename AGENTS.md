@@ -25,7 +25,7 @@ QQ 音乐协议实现不归本仓库。
 
 HelperNext 拥有：上游 module/method/params；请求信封与平台档案；签名与设备/会话身份；凭据持久化；限流/熔断；上游响应解析；分页协议语义；QRC 取回/解密与组件级歌词模型；播放链接解析与 QQ 特有结果码语义。
 
-NeuMusic 是 HelperNext 的 **consumer**。生产代码应使用 generated **typed BoltFFI Kotlin API**（迁移目标，见文末「迁移期注意」）。
+NeuMusic 是 HelperNext 的 **consumer**。生产代码使用 generated **typed BoltFFI Kotlin API**（typed 迁移已完成，见文末「迁移状态」）。
 
 不得新增基于以下内容的生产路径：
 
@@ -64,15 +64,15 @@ NeuMusic 消费钉住的官方 HelperNext Android Release：
 
 凭据唯一持久来源是组件管理的 `files/HelperNext/Credential/qqmusic-credential.json`（组件读写，路径与 schema 归组件）。
 
-规则（迁移目标）：
+规则：
 
 - 宿主不得读取/依赖 HelperNext 私有凭据文件的路径或 JSON schema；
 - 不得为判断登录态而解析/返回存储的 `qm_keyst` 等会话秘密；非敏感会话状态用 typed 账号/登录状态接口；
 - 任何输出、日志、commit 信息、报告中不得出现 uin/musickey/euin/cookie 的值；
-- 账号切换/退出必须清理宿主缓存及其在途结果（`ApiCache` 按 credential 键控、`LikedStore` generation 守卫）；
+- 账号切换/退出必须清理宿主缓存及其在途结果（`ApiCache` 按非敏感登录快照键控并在登录态变化时作废在途结果、`LikedStore` generation + 登录快照守卫）；
 - 旧凭据只允许一次性迁移导入，成功后删除宿主侧副本。
 
-存量 `data/api/HelperNext.kt` 直接读组件凭据文件，按 Phase C/D 退役。
+宿主登录态用组件 typed `loginStatus()` 的非敏感快照，不读组件凭据文件；旧 SharedPreferences 凭据的一次性迁移在 `HelperNext.kt` 初始化完成，成功后删除宿主侧副本。
 
 ## App Models
 
@@ -224,9 +224,8 @@ NeuMusic → typed HelperNext 绑定 → HelperNext → QQ 音乐
 
 仅供个人学习/自用播放；VIP 内容需用户自己的登录凭据；不批量抓取、不分发；控制请求频率。
 
-## 迁移期注意
+## 迁移状态
 
-- 本批次落地的是**边界规则文档**：上文的 typed-only 消费规则、凭据文件禁读规则与 Release 供应模式自本文件起生效，约束一切**新增**代码。
-- typed 迁移本体按后续阶段推进：当前 `data/api/` 仍有 16 处 raw `HelperNext.call(...)` 域适配调用，`data/api/HelperNext.kt` 仍直接读取组件凭据文件（启动迁移与账号态）——**存量按 Phase C/D 退役，退役前按「不得新增、只维护既有行为」对待**。
-- `app/helpernext.lock.json` 尚未建立：当前 vendor 由 `scripts/update-helpernext.sh` 从组件源码重建供应；Release 供应（lock → Release 下载 → checksum 校验 → 原子替换）随下一批次切换，切换前「成套原子、禁混版本」红线照旧适用。
-- 过渡期发现规则与现状冲突时，以「不扩大存量、不引入新违规」为底线，并在任务报告里如实说明。
+- typed 迁移已完成：生产代码（`app/src/main`）无 raw `HelperNext.call(...)` 调用，`data/api/` 各域 Api 与登录态均走 generated typed 绑定；androidTest 的 live 测试仍可走 `HelperNext.call` 包装（非生产路径）。
+- 已知偏差：`data/api/HelperNext.kt` 的 `call()` 薄包装（内部 `callWithPlatform`）保留但无生产调用方；不得为其新增生产调用点。
+- `app/helpernext.lock.json` 已建立，vendor 为 Release 供应：`scripts/update-helpernext.sh` 按 lock 下载官方 Release 资产、校验 checksum 后原子替换 `app/helpernext/`（见 `docs/HELPERNEXT.md`）。
