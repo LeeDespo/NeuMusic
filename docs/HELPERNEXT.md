@@ -69,6 +69,18 @@ raw QQ 上游 JSON 解析
 - **`app/helpernext.lock.json` 尚未建立**：Release 供应（lock → Release 下载 → checksum 校验 → 原子替换）随下一批次切换。切换前，上面的「成套原子、禁混版本」「不手改生成物」红线照旧适用，升级仍以 manifest.json 的校验和为准。
 - lock 文件建立后，本节脚本描述以 lock 流程为准并更新。
 
+## 组件行为实测结论（2026-10 接入期调研）
+
+以下结论出自接入期调研（原稿归档于 `docs/history/research/HELPERNEXT_INTEGRATION.md`），排障与验收仍适用：
+
+- **网络 FFI 调用同步阻塞**：全局超时以组件源码为准（组件 `docs/ffi.md` 写 12s，源码为 20s）。所有组件调用必须挂 `Dispatchers.IO`，否则 ANR；限流等待同样占着调用线程。
+- **组件自检 `api_surface_matches` 只查源码文本里有同名函数，不查载荷可达**——「组件测试全绿」≠ FFI 面可用，验收以真实调用为准。
+- **typed 模型字段全为 Option：载荷/信封不匹配时静默全 `None`**——调用成功但数据全空，比报错更危险；空结果先怀疑信封不匹配。
+- **`get_helper_info` 的 `credentialDir` 恒为 `true`**：是给子进程 JSON 消费者的占位布尔，不是「凭据目录已配置」的判据。
+- **`call_with_platform` 是发原始 `musicu.fcg` 请求的逃生口**（返回原始 JSON 字符串）：仅限排障/兜底；生产路径按上文消费规则禁入。
+- **组件有 `fetch_recommend_feed` 专用端点**（猜你喜欢，每次 5 首，不依赖标题）；宿主现行「电台列表按标题匹配『猜你喜欢』」可由它替换。
+- **`RecommendStore` 落盘恢复的 Track 无 `fileSizes`**：冷启动推荐曲目按 `SongApi.chain` 的空 fileSizes 行为走全档位探测。
+
 ## 边界自检（收尾检查）
 
 涉及 HelperNext 集成的改动收尾前确认生产代码没有引入：

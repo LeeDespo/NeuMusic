@@ -1,6 +1,6 @@
 # NeuMusic 接入 HelperNext：旧报告复核与实施记录
 
-原报告：`.zcode/research/HELPERNEXT_INTEGRATION.md`，2026-10-03，HelperNext 基准 `2ff7e71`。
+原报告：`docs/history/research/HELPERNEXT_INTEGRATION.md`，2026-10-03，HelperNext 基准 `2ff7e71`。
 本次开始前已提交并推送：HelperNext `7ce4a64`；NeuMusic `13cad5e`。
 
 旧报告的“47 个 FFI 导出中 31 个不可用”已过时：返回外壳解包、限流/熔断/aria2 分发已修复；

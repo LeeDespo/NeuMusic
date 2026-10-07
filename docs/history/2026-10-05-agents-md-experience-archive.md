@@ -280,7 +280,7 @@ adb -s 127.0.0.1:5555 install -r app/build/outputs/apk/debug/app-debug.apk
 
 ## Codex 接续与工具（2026-10-04）
 
-- 黑胶旧方案与工作流位于 `.zcode/vinyl-v2-plan.md`、`.zcode/workflow-runs/`；仅作历史证据，最新用户要求优先，保留中间文件。
+- 黑胶旧方案与工作流位于 `docs/history/vinyl-v2-plan.md`（原 `.zcode/vinyl-v2-plan.md`，已归档迁入）、`.zcode/workflow-runs/`；仅作历史证据，最新用户要求优先，保留中间文件。
 - 已有项目 skills：`neumorphism` 用于主界面规范；`qqmusic-web-api` 仅涉及在线接口时使用；`testing-setup` 仅需要新增 Android 测试设施时使用；`edge-to-edge` 用于系统栏问题。全局 `team-mode` 与 `ui-ux-pro-max` 可用于分工审查及局部视觉检查。已有工具足以完成本地 Android 修复，无需为本任务连接无关账号插件。
 - 本轮只操作 `emulator-5554`，不操作真机。整个任务截图浏览总预算 5 张（含子代理），由主代理统一分配。
 - 用户提供本地代理 `http://127.0.0.1:17890`；GitHub 可直连。Python GitHub 工具若证书失败，可清除该次命令的代理变量并使用 `/opt/homebrew/etc/openssl@3/cert.pem`，不得关闭 TLS 校验。

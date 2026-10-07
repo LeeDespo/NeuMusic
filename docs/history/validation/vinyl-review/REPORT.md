@@ -1,5 +1,7 @@
 # NeuMusic 黑胶唱片机接续验收 · 2026-10-04
 
+> 历史证据：REPORT 内复跑命令所用旧 runner（VinylReviewInstrumentation，见「复跑」一节）已废弃，现行黑胶回归入口为 VinylStateTest/AndroidJUnitRunner。
+
 本轮主工程修复与独立审查完成。原实验工程 VinylLab 编译通过，保持历史版本；本轮按最新要求修改 NeuMusic，不再要求两工程机械件/胶囊外观完全相同。
 
 ## 修复
