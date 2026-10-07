@@ -17,7 +17,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
@@ -77,7 +76,8 @@ object HelperNext {
         if (raw == null) return
         val legacy = runCatching {
             val value = JSONObject(raw)
-            CredentialInfo(value.getString("uin"), value.getString("musickey"), value.text("euin"))
+            CredentialInfo(value.getString("uin"), value.getString("musickey"),
+                if (value.isNull("euin")) "" else value.optString("euin"))
                 .takeIf { it.uin.removePrefix("o").toLongOrNull()?.let { id -> id > 0 } == true && it.musickey.isNotBlank() }
         }.getOrNull()
         var loggedIn = runCatching { loginStatus() }.getOrNull()?.loggedIn == true
@@ -108,9 +108,6 @@ internal fun HelperError.userMessage(): String = when (this) {
     is HelperError.Unsupported -> field0
 }
 
-internal fun JSONObject.text(key: String): String = if (isNull(key)) "" else optString(key)
-internal inline fun <T> JSONArray?.items(transform: (JSONObject) -> T?): List<T> =
-    if (this == null) emptyList() else (0 until length()).mapNotNull { optJSONObject(it)?.let(transform) }
 internal fun String.toHttps(): String = when {
     startsWith("http://") -> "https://" + removePrefix("http://")
     startsWith("//") -> "https:" + this
