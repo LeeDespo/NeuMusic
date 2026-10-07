@@ -63,11 +63,10 @@ raw QQ 上游 JSON 解析
 - 存量 `data/api/HelperNext.kt` 的直接读取与一次性旧凭据迁移按 Phase C/D 退役。
 - 任何输出/日志/commit 中不得出现凭据票据值。
 
-## 升级脚本与现状（迁移期）
+## 升级脚本
 
-- 现行更新入口：`scripts/update-helpernext.sh`（配合 `scripts/install-helpernext.py`）。默认从相邻源码仓库 `../QQMusicApi_HelperNext` 打包（`HELPERNEXT_SOURCE=<路径>` 可指定）；没有相邻源码时，按 `manifest.json` 的远程 revision 拉取源码、套用 `app/helpernext/source.patch` 并校验 `sourceSha256` 后重建，再 `boltffi pack android` 出四 ABI 并整体安装到 vendor 目录。
-- **`app/helpernext.lock.json` 尚未建立**：Release 供应（lock → Release 下载 → checksum 校验 → 原子替换）随下一批次切换。切换前，上面的「成套原子、禁混版本」「不手改生成物」红线照旧适用，升级仍以 manifest.json 的校验和为准。
-- lock 文件建立后，本节脚本描述以 lock 流程为准并更新。
+- 现行更新入口：`scripts/update-helpernext.sh`（配合 `scripts/install-helpernext.py`），按 `app/helpernext.lock.json` 钉住的官方 Android Release 资产执行：下载 → sha256 校验 → `install-helpernext.py` 复核归档 manifest（componentVersion/gitCommit 对 lock、ABI 集、逐文件 SHA-256 与必备文件）→ 原子替换 `app/helpernext/`。不在本仓库重建 HelperNext 源码。
+- 「成套原子、禁混版本」「不手改生成物」红线照旧适用。
 
 ## 组件行为实测结论（2026-10 接入期调研）
 

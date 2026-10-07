@@ -35,7 +35,7 @@ NeuMusic 的核心目标是探索一件事：**在纯 Compose 里手写一套完
 - **播放**：Media3 / ExoPlayer，`PlaybackParameters` 实现变速变调；音频管线插入透传 `AudioProcessor` 采集 PCM 做可视化（免录音权限）
 - **音效**：Android 平台 audiofx（`Equalizer` / `BassBoost` / `DynamicsProcessing`），全部挂到播放器音频会话
 - **逐字歌词**：QRC 密文解码由内嵌 HelperNext 组件完成（非标准类 DES 三重解密 → zlib，算法与 qrc-decoder 同源），渲染层用双层文本 + `clipRect` 扫色（AMLL 式）
-- **数据**：内嵌 [HelperNext](https://github.com/LeeDespo/QQMusicApi_HelperNext) Rust/BoltFFI 组件直连 QQ 音乐接口（凭据、设备档案、限流、QRC 解码均在组件内），宿主各域 Api 只做组件 JSON → UI 数据的薄适配，StateFlow 响应式；接口字段与调用细节见源码注释（均经实测校准）
+- **数据**：内嵌 [HelperNext](https://github.com/LeeDespo/QQMusicApi_HelperNext) Rust/BoltFFI 组件直连 QQ 音乐接口（凭据、设备档案、限流、QRC 解码均在组件内），宿主各域 Api 只做 HelperNext typed models → NeuMusic models 的薄映射，StateFlow 响应式；接口字段与调用细节见源码注释（均经实测校准）
 
 ## 构建
 
@@ -58,6 +58,6 @@ NeuMusic 的核心目标是探索一件事：**在纯 Compose 里手写一套完
 
 ## 许可
 
-本项目以 GPL-3.0 开源，完整文本见 LICENSE。QQ 音乐访问使用嵌入式 [HelperNext](https://github.com/LeeDespo/QQMusicApi_HelperNext) Rust/BoltFFI 组件（GPL-3.0-or-later）；Kotlin/JNI 产物及来源校验记录位于 `app/helpernext/`。构建无需 Python 边车或常驻服务。生成或更新组件时运行 `HELPERNEXT_SOURCE=/path/to/QQMusicApi_HelperNext scripts/update-helpernext.sh`，常规 Android 构建直接使用仓库中的配套产物。
+本项目以 GPL-3.0 开源，完整文本见 LICENSE。QQ 音乐访问使用嵌入式 [HelperNext](https://github.com/LeeDespo/QQMusicApi_HelperNext) Rust/BoltFFI 组件（GPL-3.0-or-later）；Kotlin/JNI 产物及来源校验记录位于 `app/helpernext/`。构建无需 Python 边车或常驻服务。组件版本锁定在 `app/helpernext.lock.json`，更新脚本下载并校验官方 Android Release 资产后整体替换 `app/helpernext/`，常规 Android 构建直接使用仓库中的配套产物。
 
-Android 继续负责 Media3 播放、MediaStore 下载、文件命名、已下载台账与歌词渲染；组件负责在线接口、设备身份、凭据、限流和 QRC 解码。原 SharedPreferences 登录凭据首次启动会迁移到应用私有 `files/HelperNext/Credential/qqmusic-credential.json`，写入成功后删除旧副本。
+Android 继续负责 Media3 播放、MediaStore 下载、文件命名、已下载台账与歌词渲染；组件负责在线接口、设备身份、凭据、限流和 QRC 解码。原 SharedPreferences 登录凭据（legacy credentials）首次启动会一次性导入 HelperNext 托管的私有存储，导入成功后删除宿主侧旧副本。
