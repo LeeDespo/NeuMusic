@@ -1,0 +1,92 @@
+# CI for NeuMusic.
+#
+# Gates:
+#   1. Vendor guard   — app/helpernext/ must be the pinned HelperNext Release
+#                       artifact set: lock + vendor manifest exist, all four ABI
+#                       native libraries present, no source.patch overlay, and
+#                       lock/vendor version identity (componentVersion and
+#                       gitCommit, mirroring scripts/install-helpernext.py).
+#   2. Boundary guard — production code must not reach raw HelperNext paths.
+#                       The scan is rooted at app/src/main/java, which
+#                       inherently excludes the generated vendor tree
+#                       (app/helpernext/), docs/history/ and the test source
+#                       sets (app/src/test, app/src/androidTest). JSONObject is
+#                       deliberately not restricted: org.json parsing is
+#                       legitimate host-side code.
+#
+# `callWithPlatform(` is intentionally NOT enforced yet: the legacy raw bridge
+# app/src/main/java/com/neumusic/player/data/api/HelperNext.kt still calls it
+# (Phase C/D retirement pending). Re-add the pattern to the boundary guard once
+# that file is gone.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ci:
+    name: Guards, unit tests, assemble
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Vendor guard
+        run: |
+          set -eu
+          lock=app/helpernext.lock.json
+          manifest=app/helpernext/manifest.json
+          [ -f "$lock" ] || { echo "::error::missing $lock"; exit 1; }
+          [ -f "$manifest" ] || { echo "::error::missing $manifest"; exit 1; }
+          for abi in arm64-v8a armeabi-v7a x86 x86_64; do
+            so="app/helpernext/jniLibs/$abi/libqqmusic_api_helper_next.so"
+            [ -f "$so" ] || { echo "::error::missing native library for $abi: $so"; exit 1; }
+          done
+          stray=$(find app/helpernext -name 'source.patch')
+          if [ -n "$stray" ]; then
+            echo "::error::app/helpernext/ must not contain source.patch (vendor is a released artifact set, not patched sources):"
+            printf '%s\n' "$stray"
+            exit 1
+          fi
+          lock_version=$(jq -r '.version // empty' "$lock")
+          lock_commit=$(jq -r '.gitCommit // empty' "$lock")
+          manifest_version=$(jq -r '.componentVersion // empty' "$manifest")
+          manifest_commit=$(jq -r '.gitCommit // empty' "$manifest")
+          [ -n "$lock_version" ] || { echo "::error::$lock: missing .version"; exit 1; }
+          [ -n "$manifest_version" ] || { echo "::error::$manifest: missing .componentVersion"; exit 1; }
+          [ "$lock_version" = "$manifest_version" ] || { echo "::error::lock version $lock_version != manifest componentVersion $manifest_version"; exit 1; }
+          [ "$lock_commit" = "$manifest_commit" ] || { echo "::error::lock gitCommit $lock_commit != manifest gitCommit $manifest_commit"; exit 1; }
+          echo "Vendor OK: component $manifest_version @ ${manifest_commit:0:12}"
+
+      - name: Boundary guard
+        run: |
+          set -eu
+          failures=0
+          for pattern in 'HelperNext.call(' 'qqmusic-credential.json' 'musicu.fcg' 'g_tk'; do
+            hits=$(grep -rnF --include='*.kt' --include='*.java' -e "$pattern" app/src/main/java || true)
+            if [ -n "$hits" ]; then
+              echo "::error title=Boundary guard::forbidden pattern '$pattern' in production code (app/src/main/java):"
+              printf '%s\n' "$hits"
+              failures=1
+            fi
+          done
+          [ "$failures" -eq 0 ] || exit 1
+          echo "Boundary OK: no raw HelperNext paths under app/src/main/java"
+
+      - name: JVM unit tests
+        run: ./gradlew :app:testDebugUnitTest
+
+      - name: Assemble debug APK
+        run: ./gradlew :app:assembleDebug
